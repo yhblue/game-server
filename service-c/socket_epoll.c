@@ -4,9 +4,13 @@
 
 int epoll_init()
 {
-    return epoll_create(1024);
+   int efd = epoll_create(1024);
 }
 
+int efd_err(int efd)
+{
+	return efd ==-1;
+}
 void epoll_release(int efd)
 {
      close(efd);
@@ -20,7 +24,7 @@ int epoll_add(int efd, int sock, void *ud)
 
 	if (epoll_ctl(efd, EPOLL_CTL_ADD, sock, &ev) == -1) 
 	{
-		return 1;
+		return -1;
 	}
 	return 0;
 }
