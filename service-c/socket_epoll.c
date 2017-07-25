@@ -2,12 +2,17 @@
 #include <sys/epoll.h>
 
 
-int socket_epoll_init()
+int epoll_init()
 {
     return epoll_create(1024);
 }
 
-int socket_epoll_add(int efd, int sock, void *ud)
+void epoll_release(int efd)
+{
+     close(efd);
+}
+
+int epoll_add(int efd, int sock, void *ud)
 {
 	struct epoll_event ev;
 	ev.events = EPOLLIN;
@@ -20,10 +25,15 @@ int socket_epoll_add(int efd, int sock, void *ud)
 	return 0;
 }
 
-
-void socket_epoll_del(int efd,int sock)
+void epoll_del(int efd,int sock)
 {
    epoll_ctl(efd, EPOLL_CTL_DEL, sock , NULL);
 }
 
-void 
+void epoll_wait(int efd, struct event *e, int max)
+{
+    struct epoll_event ev[max];
+    int ret_n = epoll_wait(efd,ev,max,-1);  //-1没有句柄发生变化，则一直等待
+    
+}
+
