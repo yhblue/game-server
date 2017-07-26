@@ -20,7 +20,7 @@
 #define MAX_SOCKET 64*1024  //最多支持64k个socket连接
 struct event
 {
-	void * ptr;        //
+	void * ptr;        
 	bool read_event;
 	bool write_event;
 };
@@ -83,11 +83,18 @@ static int do_listen(const char* host,int port,int backlog)
         return -1;
     }
 
-    struct sockaddr_in servaddr;
+    struct sockaddr_in servaddr;     //ipv4 struction
     bzero(&servaddr,sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    inet_pton(AF_INET,ip,&servaddr.sin_addr); //字符串->网络字节流
-    servaddr.sin_port = htons(port);          //主机->网络
+    servaddr.sin_family = AF_INET;  //ipv4
+    srvaddr.sin_addr.s_addr = inet_addr(host);
+ //   inet_pton(AF_INET,host,&servaddr.sin_addr); //字符串->网络字节流  
+    servaddr.sin_port = htons(port);              //主机->网络
+
+    int optval = 1;
+    if(setsockopt(listen_fd,SOL_SOCKET,SO_REUSEADDR,&optval,sizeof(optval)) == -1)
+    {
+    	fprintf(ERR_FILE,"setsockopt failed\n");  
+    }
     if (bind(listenfd,(struct sockaddr*)&servaddr,sizeof(servaddr)) == -1)
     {
         fprintf(ERR_FILE,"bind failed\n");  
