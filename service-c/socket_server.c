@@ -5,8 +5,10 @@
 #include "socket_epoll.h"
 #include "err.h"
 
-#include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -16,14 +18,11 @@
 #include <assert.h>
 #include <string.h>
 
-#define MAX_EVENT 64    //epoll_wait一次最多返回64个事件
+
+
+
+#define MAX_EVENT 64         //epoll_wait一次最多返回64个事件
 #define MAX_SOCKET 64*1024  //最多支持64k个socket连接
-struct event
-{
-	void * ptr;        
-	bool read_event;
-	bool write_event;
-};
 
 struct socket
 {
@@ -34,7 +33,7 @@ struct socket
 
 struct socket_server 
 {
-    poll_fd epoll_fd;            //epoll fd
+    int epoll_fd;            //epoll fd
     int event_n;                 //epoll_wait返回的事件个数
     struct socket* socket_pool;  //socket pool，record every socket massage
     struct event* event_pool;    //event pool,record event massage
@@ -44,10 +43,10 @@ struct socket_server
 
 struct socket_server* socket_server_create()
 {
-	poll_fd efd = epoll_init();
+	int efd = epoll_init();
 	if(efd_err(efd))
 	{
-		fprintf(ERR_FILE, "epoll create failed%s\n");
+		fprintf(ERR_FILE,"epoll create failed\n");
 		return NULL;
 	}
 
@@ -55,7 +54,7 @@ struct socket_server* socket_server_create()
 	ss->epoll_fd = efd;
 	ss->event_n = 0;
 	ss->socket_pool = (struct socket*)malloc(sizeof(struct socket)*MAX_SOCKET);
-	ss->event_pool = (struct)malloc(sizeof(struct event)*MAX_EVENT);
+	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
 	if((!ss->socket_pool) || (!ss->event_pool))
 	{
 		fprintf(ERR_FILE,"socket_pool or event_pool malloc failed");
@@ -83,19 +82,20 @@ static int do_listen(const char* host,int port,int backlog)
         return -1;
     }
 
-    struct sockaddr_in servaddr;     //ipv4 struction
-    bzero(&servaddr,sizeof(servaddr));
-    servaddr.sin_family = AF_INET;  //ipv4
-    srvaddr.sin_addr.s_addr = inet_addr(host);
+    struct sockaddr_in serv_addr;     //ipv4 struction
+    bzero(&serv_addr,sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;  //ipv4
+    serv_addr.sin_addr.s_addr = inet_addr(host);
  //   inet_pton(AF_INET,host,&servaddr.sin_addr); //字符串->网络字节流  
-    servaddr.sin_port = htons(port);              //主机->网络
+    serv_addr.sin_port = htons(port);              //主机->网络
 
     int optval = 1;
     if(setsockopt(listen_fd,SOL_SOCKET,SO_REUSEADDR,&optval,sizeof(optval)) == -1)
     {
     	fprintf(ERR_FILE,"setsockopt failed\n");  
+    	goto _err;   
     }
-    if (bind(listenfd,(struct sockaddr*)&servaddr,sizeof(servaddr)) == -1)
+    if (bind(listen_fd,(struct sockaddr*)&serv_addr,sizeof(serv_addr)) == -1)
     {
         fprintf(ERR_FILE,"bind failed\n");  
         goto _err;      
@@ -105,10 +105,10 @@ static int do_listen(const char* host,int port,int backlog)
 		fprintf(ERR_FILE,"listen failed\n"); 
 		goto _err;
 	}    
-    return listenfd;
+    return listen_fd;
 
 _err:
-	close(listenfd);
+	close(listen_fd);
 	return -1;  
 }
 
