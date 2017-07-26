@@ -40,6 +40,13 @@ int sepoll_wait(int efd, struct event *e, int max)
 {
     struct epoll_event ev[max];
     int ret_n = epoll_wait(efd,ev,max,-1);  //-1没有句柄发生变化，则一直等待
+	for (i=0;i<n;i++) //epoll返回的事件信息存储到自定义的event数组中
+	{
+		e[i].s_p = ev[i].data.ptr;
+		unsigned flag = ev[i].events;
+		e[i].write = (flag & EPOLLOUT)? 1 : 0;
+		e[i].read = (flag & EPOLLIN)? 1 : 0;
+    }
     return ret_n;
 }
 

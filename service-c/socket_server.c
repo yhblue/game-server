@@ -19,10 +19,18 @@
 #include <string.h>
 
 
-
-
 #define MAX_EVENT 64         //epoll_wait一次最多返回64个事件
 #define MAX_SOCKET 64*1024  //最多支持64k个socket连接
+
+#define SOCKET_TYPE_INVALID 0		// 无效的套接字
+#define SOCKET_TYPE_RESERVE 1		// 预留，已被申请，即将投入使用
+#define SOCKET_TYPE_PLISTEN 2		// 监听套接字，未加入epoll管理
+#define SOCKET_TYPE_LISTEN 3		// 监听套接字，已加入epoll管理
+#define SOCKET_TYPE_CONNECTING 4	// 尝试连接中的套接字
+#define SOCKET_TYPE_CONNECTED 5		// 已连接套接，主动或被动(connect,accept成功，并已加入epoll管理)
+#define SOCKET_TYPE_HALFCLOSE 6		// 应用层已发起关闭套接字请求，应用层发送缓冲区尚未发送完，未调用close
+#define SOCKET_TYPE_PACCEPT 7		// accept返回的已连接套接字，但未加入epoll管理
+#define SOCKET_TYPE_OTHER 8			// 其它类型的文件描述符，比如stdin,stdout等
 
 struct socket
 {
@@ -33,13 +41,42 @@ struct socket
 
 struct socket_server 
 {
-    int epoll_fd;            //epoll fd
+    int epoll_fd;                //epoll fd
     int event_n;                 //epoll_wait返回的事件个数
     struct socket* socket_pool;  //socket pool，record every socket massage
     struct event* event_pool;    //event pool,record event massage
     int event_index;             //from 0 to 63
 };
 
+struct request_star
+{
+	int id;
+};
+
+struct request_close 
+{
+	int id;
+};
+
+struct request_send
+{
+	int id;
+	int sz;
+	char * buffer;
+};
+
+struct request_package
+{
+	uint8_t header[8];//header[0]->massage type header[1]->massage len
+	union _msg
+	{
+		char buffer[256];
+		//struct request_open open;
+		struct request_send send;
+		struct request_star start;
+		struct request_close close;	
+	}msg;
+};
 
 struct socket_server* socket_server_create()
 {
@@ -117,16 +154,56 @@ int socket_server_listen(struct socket_server *ss,const char* host,int port,int 
 	int fd = do_listen(host,port,backlog);
 	if(fd < 0)
 	{
-		return -1;
+	   return -1;
 	}
 }
 
 int socket_server_event(struct socket_server *ss, struct socket_message * result)
 {
-    
+    ss->event_n = sepoll_wait(ss->epoll_fd,);
 }
 
+//id from 0-2^31-1
+static int apply_id()
+{
+	static int id = 0;
+	id ++;
+	if(id < 0) 
+	{
+		id = 1;
+	}
+	return id;
+}
 
+//fd->epoll
+void socket_server_start(struct socket_server *ss,int id)
+{
+	struct request_package request;
+	request.msg.start.id = id;
+}
 
-
+//client fd->epoll 
+static int start_socket(struct socket_server *ss,struct request_start* reques,struct socket_message* result)
+{
+	int id = reques.msg.start.id; 
+	result.id = fd;
+	result->ud = 0;
+	result->data = NULL;
+	struct socket *s = ss->socket_pool[id % MAX_SOCKET];  
+	if(s->type == SOCKET_TYPE_INVALID || s->id = !id) //
+	{
+		return SOCKET_ERROR;
+	}
+	if (s->type == SOCKET_TYPE_PACCEPT || s->type == SOCKET_TYPE_PLISTEN) 
+	{
+		if(epoll_add(ss->epoll_fd,s->fd,s->fd,s) == -1)
+		{
+			s->type = SOCKET_TYPE_INVALID;
+			return SOCKET_ERROR;
+		}
+		s->type = (s->type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN;//change
+		result->data = "start";
+		return SOCKET_SUCCESS;
+	}
+}
 

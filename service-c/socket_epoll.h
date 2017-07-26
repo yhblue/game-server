@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 struct event {
-	void * s;
+	void * s_p; //指向注册到epoll时候对应的socket_pool的成员
 	bool read;
 	bool write;
 };
