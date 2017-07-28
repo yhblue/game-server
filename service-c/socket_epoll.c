@@ -32,9 +32,13 @@ int epoll_add(int efd, int sock, void *ud)
 	return 0;
 }
 
-void epoll_del(int efd,int sock)
+int epoll_del(int efd,int sock)
 {
-   epoll_ctl(efd, EPOLL_CTL_DEL, sock , NULL);
+   if(epoll_ctl(efd, EPOLL_CTL_DEL, sock , NULL) ==-1)
+   {
+   		return -1;
+   }
+   return 0;
 }
 
 int sepoll_wait(int efd, struct event *e, int max)

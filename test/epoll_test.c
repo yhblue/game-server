@@ -22,10 +22,10 @@ int main()
 			case SOCKET_EXIT:
 				goto _EXIT;
 			case SOCKET_DATA:
-
+				printf("data(%lu) [id=%d] %s\n", result.opaque, result.id, result.data);
 				break;
 			case SOCKET_ACCEPT:
-				printf("accept");
+				printf("accept[id=%d]",);
 				break;
 			
 		}

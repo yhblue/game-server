@@ -1,6 +1,7 @@
 #ifndef  _SOCKET_SERVER_H
 #define _SOCKET_SERVER_H
 
+//返回的result的类型
 #define SOCKET_DATA 0			// 有数据到来
 #define SOCKET_CLOSE 1			// 连接关闭
 #define SOCKET_SUCCESS 2		// 连接成功建立（主动或者被动，并且已加入到epoll）
@@ -11,7 +12,7 @@
 
 struct socket_message {
 	int id;
-	int ud;	           // for accept,ud是新连接的id，for data,size of data
+	int ud;	           // for accept,ud is id，for data,size of data
 	char * data;
 };
 

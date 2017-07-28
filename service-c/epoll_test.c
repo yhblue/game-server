@@ -1,10 +1,40 @@
 #include "socket_server.h"
+#include "socket_epoll.h"
 
-#include <stdio.h>
-
-int main(void)
+int main()
 {
-	printf("test start!\n");
-	printf("test successful!\n");
-	return 0;
+	struct socket_server* ss = socket_server_create();
+	if(ss == NULL)
+		return -1;
+
+	int listen_id = socket_server_listen(ss,"127.0.0.1",8888,32);
+	if(listen_id == -1)
+		return -1;
+
+	socket_server_start(ss,listen_id);
+	struct socket_message result;
+	for ( ; ; )
+	{
+		int type = socket_server_event(ss,&result);
+
+		switch(type)  //这里以后代替为与框架数据处理进程通信的进程
+		{
+			case SOCKET_EXIT:
+				goto _EXIT;
+			case SOCKET_DATA:
+				printf("data(%lu) [id=%d] %s\n",result.id, result.data);
+				break;
+			case SOCKET_ACCEPT://client connect
+				printf("accept[id=%d] from [id=%d]",result.id,result.ud);
+				socket_server_start(ss,result.ud);  //add to epoll
+				break;		
+			case SOCKET_CLOSE:
+				printf("closed[id=%d]",result.id);
+				break;
+			case SOCKET_SUCCESS:	
+				printf("success[id=%d],data=%s\n", );
+		}
+	}
+_EXIT:
+	socket_server_release();
 }

@@ -19,18 +19,18 @@
 #include <string.h>
 
 
-#define MAX_EVENT 64         //epoll_wait一次最多返回64个事件
-#define MAX_SOCKET 64*1024  //最多支持64k个socket连接
+#define MAX_EVENT 64                //epoll_wait一次最多返回64个事件
+#define MAX_SOCKET 64*1024          //最多支持64k个socket连接
 
 #define SOCKET_TYPE_INVALID 0		// 无效的套接字
 #define SOCKET_TYPE_RESERVE 1		// 预留，已被申请，即将投入使用 --取消这个类型吧，感觉没什么用
 #define SOCKET_TYPE_PLISTEN 2		// 监听套接字，未加入epoll管理
-#define SOCKET_TYPE_LISTEN 3		// 监听套接字，已加入epoll管理
-#define SOCKET_TYPE_CONNECTING 4	// 尝试连接中的套接字
-#define SOCKET_TYPE_CONNECTED 5		// 已连接套接，主动或被动(connect,accept成功，并已加入epoll管理)
-#define SOCKET_TYPE_HALFCLOSE 6		// 应用层已发起关闭套接字请求，应用层发送缓冲区尚未发送完，未调用close
+#define SOCKET_TYPE_LISTEN  3		// 监听套接字，已加入epoll管理
+#define SOCKET_TYPE_CONNECTING 4	// 尝试连接中的套接字           --取消这个类型吧，感觉没什么用
+#define SOCKET_TYPE_CONNECTED  5	// 已连接套接，主动或被动(connect,accept成功，并已加入epoll管理)
+#define SOCKET_TYPE_HALFCLOSE  6	// 应用层已发起关闭套接字请求，应用层发送缓冲区尚未发送完，未调用close
 #define SOCKET_TYPE_PACCEPT 7		// accept返回的已连接套接字，但未加入epoll管理
-#define SOCKET_TYPE_OTHER 8			// 其它类型的文件描述符，比如stdin,stdout等
+#define SOCKET_TYPE_OTHER   8		// 其它类型的文件描述符，比如stdin,stdout等
 
 struct socket
 {
@@ -229,7 +229,6 @@ struct socket_server* socket_server_create()
 }
 
 
-
 int socket_server_listen(struct socket_server *ss,const char* host,int port,int backlog)
 {
 	int listen_fd = do_listen(host,port,backlog);
@@ -262,8 +261,6 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		struct event* eve = ss->event_pool[ss->event_index++];
 		
 	}
-    
-    
 }
 
 
@@ -278,8 +275,6 @@ void socket_server_start(struct socket_server *ss,int id)
 
 
 
-
-
 void socket_server_release(struct socket_server *ss)
 {
 	int i = 0;
@@ -287,6 +282,11 @@ void socket_server_release(struct socket_server *ss)
 	for(i=0; i<MAX_SOCKET; i++)
 	{
 		s = ss->socket_pool[i];
+		if(s->type == SOCKET_TYPE_CONNECTED || s->type == SOCKET_TYPE_LISTEN)
+		{
+			epoll_del(s->efd,s->id);
+		}
+
 		close(s->fd);
 	}
 	epoll_release(ss->epoll_fd);	
