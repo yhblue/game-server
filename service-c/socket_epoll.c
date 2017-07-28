@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <fcntl.h>
+
 
 int epoll_init()
 {
@@ -56,3 +58,16 @@ int sepoll_wait(int efd, struct event *e, int max)
     return ret_n;
 }
 
+int set_nonblock(int fd)
+{
+	int flag = fcntl(fd, F_GETFL, 0);
+	if ( flag == -1 ) 
+	{
+		return;
+	}
+	if(fcntl(fd, F_SETFL, flag | O_NONBLOCK) == -1)
+	{
+		return -1;
+	}
+	return 0;
+}

@@ -113,6 +113,12 @@ static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool a
 	return s;
 }
 
+static void socket_keepalive(int fd)
+{
+	int keepalive = 1;
+	setsockopt(fd,SOL_SOCKET,SO_KEEPALIVE,sizeof(keepalive));	　　　　　　
+}
+
 //client fd add to epoll 
 static int start_socket(struct socket_server *ss,struct request_start* reques,struct socket_message* result)
 {
@@ -196,6 +202,39 @@ _err:
 	return -1;
 }
 
+static int dispose_accept(struct socket_server *ss,struct socket *s,struct socket_message *result)
+{
+	int listen_fd = s->fd;
+	struct sockaddr_in address;
+	socklen_t addr_len = sizeof(address);
+	int client_fd = accept(listen_fd,(struct sockaddr*)&address,(socklen_t*)&addr_len);
+	if(client_fd == -1)
+	{
+		fprintf(ERR_FILE,"accept failed\n");
+		return -1;
+	}
+
+	int id = apply_id();
+	socket_keepalive(client_fd);
+	if(set_nonblock(client_fd) == -1)
+	{
+		fprintf(ERR_FILE,"set set_nonblock failed\n");
+		return -1;
+	}
+	struct socket* cs = apply_socket(ss,client_fd,id,false);
+	if(cs == NULL) //
+	{
+		close(client_fd);
+		fprintf(ERR_FILE,"set set_nonblock failed\n");
+		return -1;
+	}
+	cs->type = SOCKET_TYPE_PACCEPT;
+	result->id = id;
+	result->lid_size = listen_fd;
+	result->data = NULL;
+	return 0;   
+}//2017/7/28 20:56
+
 //--------------------------------------------------------------------------------------------------
 
 struct socket_server* socket_server_create()
@@ -214,7 +253,7 @@ struct socket_server* socket_server_create()
 	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
 	if((!ss->socket_pool) || (!ss->event_pool))
 	{
-		fprintf(ERR_FILE,"socket_pool or event_pool malloc failed");
+		fprintf(ERR_FILE,"socket_pool or event_pool malloc failed\n");
 		return NULL;
 	}
 	ss->event_index = 0;
@@ -260,7 +299,12 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 			ss->event_index = 0;
 		}
 		struct event* eve = &ss->event_pool[ss->event_index++];
-		
+		struct socket *s = e->s_p; //socket_pool 中成员
+		switch(s->type) //判断哪一类型的socket发生变化
+		{
+			case SOCKET_TYPE_LISTEN: //client connect
+
+		}
 	}
 }
 

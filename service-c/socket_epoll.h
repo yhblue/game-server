@@ -16,5 +16,5 @@ int epoll_release(int efd);
 int epoll_add(int efd, int sock, void *ud);
 int epoll_del(int efd,int sock);
 int sepoll_wait(int efd, struct event *e, int max);
-
+int set_nonblock(int fd);
 #endif
