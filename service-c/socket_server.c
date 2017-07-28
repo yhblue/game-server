@@ -48,7 +48,7 @@ struct socket_server
     int event_index;             //from 0 to 63
 };
 
-struct request_star
+struct request_start
 {
 	int id;
 };
@@ -68,12 +68,12 @@ struct request_send
 struct request_package
 {
 	uint8_t header[8];//header[0]->massage type header[1]->massage len
-	union _msg
+	union
 	{
 		char buffer[256];
 		//struct request_open open;
 		struct request_send send;
-		struct request_star start;
+		struct request_start start;
 		struct request_close close;	
 	}msg;
 };
@@ -95,7 +95,7 @@ static int apply_id()
 //apply a socket from socket_pool 
 static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool add_epoll)
 {
-	struct socket* s = ss->socket_pool[id % MAX_SOCKET];
+	struct socket* s = &ss->socket_pool[id % MAX_SOCKET];
 
 	assert(s->type == SOCKET_TYPE_INVALID);
 
@@ -116,18 +116,18 @@ static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool a
 //client fd add to epoll 
 static int start_socket(struct socket_server *ss,struct request_start* reques,struct socket_message* result)
 {
-	int id = reques.msg.start.id; 
-	result.id = fd;
-	result->ud = 0;
+	int id = reques->id;
+	result->id = id;
+	result->lid_size = 0;
 	result->data = NULL;
-	struct socket *s = ss->socket_pool[id % MAX_SOCKET];  
-	if(s->type == SOCKET_TYPE_INVALID || s->id = !id) //
+	struct socket *s = &ss->socket_pool[id % MAX_SOCKET];  
+	if(s->type == SOCKET_TYPE_INVALID || s->id != id) //
 	{
 		return SOCKET_ERROR;
 	}
 	if (s->type == SOCKET_TYPE_PACCEPT || s->type == SOCKET_TYPE_PLISTEN) 
 	{
-		if(epoll_add(ss->epoll_fd,s->fd,s->fd,s) == -1)
+		if(epoll_add(ss->epoll_fd,s->fd,s) == -1)
 		{
 			s->type = SOCKET_TYPE_INVALID;
 			return SOCKET_ERROR;
@@ -136,6 +136,7 @@ static int start_socket(struct socket_server *ss,struct request_start* reques,st
 		result->data = "start";
 		return SOCKET_SUCCESS;//成功加入到 epoll 中管理。
 	}
+	return SOCKET_ERROR;
 }
 
 static int do_listen(const char* host,int port,int backlog)
@@ -181,11 +182,11 @@ _err:
 //为 listen_fd 申请 socket_pool 中一个成员
 static int listen_socket(struct socket_server *ss,int listen_fd,int id)
 {
-	struct socket *s = apply_socket(ss,listen_fd,id);
+	struct socket *s = apply_socket(ss,listen_fd,id,false);
 	if(s == NULL)
 	{
 		fprintf(ERR_FILE,"listen_id apply socket failed\n"); 
-		goto _err:
+		goto _err;
 	}  
 	s->type = SOCKET_TYPE_PACCEPT;//未放入 epoll 中管理
 	return 0;
@@ -225,7 +226,7 @@ struct socket_server* socket_server_create()
 		s->fd = 0;
 		s->id = 0;
 	}
-
+	return ss;
 }
 
 
@@ -258,7 +259,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 			}	
 			ss->event_index = 0;
 		}
-		struct event* eve = ss->event_pool[ss->event_index++];
+		struct event* eve = &ss->event_pool[ss->event_index++];
 		
 	}
 }
@@ -281,12 +282,11 @@ void socket_server_release(struct socket_server *ss)
 	struct socket *s = NULL;
 	for(i=0; i<MAX_SOCKET; i++)
 	{
-		s = ss->socket_pool[i];
+		s = &ss->socket_pool[i];
 		if(s->type == SOCKET_TYPE_CONNECTED || s->type == SOCKET_TYPE_LISTEN)
 		{
-			epoll_del(s->efd,s->id);
+			epoll_del(ss->epoll_fd,s->id);
 		}
-
 		close(s->fd);
 	}
 	epoll_release(ss->epoll_fd);	

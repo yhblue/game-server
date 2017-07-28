@@ -12,7 +12,7 @@
 
 struct socket_message {
 	int id;
-	int ud;	           // for accept,ud is id，for data,size of data
+	int lid_size;	           // for accept,ud is id，for data,size of data
 	char * data;
 };
 

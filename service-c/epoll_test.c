@@ -1,6 +1,8 @@
 #include "socket_server.h"
 #include "socket_epoll.h"
 
+#include <stdio.h>
+
 int main()
 {
 	struct socket_server* ss = socket_server_create();
@@ -17,24 +19,24 @@ int main()
 	{
 		int type = socket_server_event(ss,&result);
 
-		switch(type)  //这里以后代替为与框架数据处理进程通信的进程
+		switch(type)  //这里以后代替为与框架数据处理进程通信的代码
 		{
 			case SOCKET_EXIT:
 				goto _EXIT;
 			case SOCKET_DATA:
-				printf("data(%lu) [id=%d] %s\n",result.id, result.data);
+				printf("data[id=%d],size=%d,%s\n",result.id,result.lid_size,result.data);
 				break;
 			case SOCKET_ACCEPT://client connect
-				printf("accept[id=%d] from [id=%d]",result.id,result.ud);
-				socket_server_start(ss,result.ud);  //add to epoll
+				printf("accept[id=%d] from [id=%d]",result.id,result.lid_size);
+				socket_server_start(ss,result.lid_size);  //add to epoll
 				break;		
 			case SOCKET_CLOSE:
 				printf("closed[id=%d]",result.id);
 				break;
 			case SOCKET_SUCCESS:	
-				printf("success[id=%d],data=%s\n", );
+				printf("success[id=%d],data=%s\n",result.id,result.data);
 		}
 	}
 _EXIT:
-	socket_server_release();
+	socket_server_release(ss);
 }
