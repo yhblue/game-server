@@ -23,7 +23,7 @@
 #define MAX_SOCKET 64*1024  //最多支持64k个socket连接
 
 #define SOCKET_TYPE_INVALID 0		// 无效的套接字
-#define SOCKET_TYPE_RESERVE 1		// 预留，已被申请，即将投入使用
+#define SOCKET_TYPE_RESERVE 1		// 预留，已被申请，即将投入使用 --取消这个类型吧，感觉没什么用
 #define SOCKET_TYPE_PLISTEN 2		// 监听套接字，未加入epoll管理
 #define SOCKET_TYPE_LISTEN 3		// 监听套接字，已加入epoll管理
 #define SOCKET_TYPE_CONNECTING 4	// 尝试连接中的套接字
@@ -34,15 +34,15 @@
 
 struct socket
 {
-	int fd;
-	int id;
+	int fd;       //socket fd  
+	int id;       //id
 	int type;     //socket type
 };
 
 struct socket_server 
 {
     int epoll_fd;                //epoll fd
-    int event_n;                 //epoll_wait返回的事件个数
+    int event_n;                 //epoll_wait return number of event
     struct socket* socket_pool;  //socket pool，record every socket massage
     struct event* event_pool;    //event pool,record event massage
     int event_index;             //from 0 to 63
@@ -78,35 +78,64 @@ struct request_package
 	}msg;
 };
 
-struct socket_server* socket_server_create()
+//---------------------------------------------------------------------------------------------------------------------------
+
+//id from 1-2^31-1
+static int apply_id()
 {
-	int efd = epoll_init();
-	if(efd_err(efd))
+	static int id = 0;
+	id ++;
+	if(id < 0) 
 	{
-		fprintf(ERR_FILE,"epoll create failed\n");
-		return NULL;
+		id = 1;
+	}
+	return id;
+}
+
+//apply a socket from socket_pool 
+static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool add_epoll)
+{
+	struct socket* s = ss->socket_pool[id % MAX_SOCKET];
+
+	assert(s->type == SOCKET_TYPE_INVALID);
+
+	if(add_epoll)
+	{
+		if(epoll_add(ss->epoll_fd,fd,s) == -1)
+		{
+			s->type = SOCKET_TYPE_INVALID;
+			return NULL;
+		}
 	}
 
-	struct socket_server *ss = malloc(sizeof(*ss));
-	ss->epoll_fd = efd;
-	ss->event_n = 0;
-	ss->socket_pool = (struct socket*)malloc(sizeof(struct socket)*MAX_SOCKET);
-	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
-	if((!ss->socket_pool) || (!ss->event_pool))
-	{
-		fprintf(ERR_FILE,"socket_pool or event_pool malloc failed");
-		return NULL;
-	}
-	ss->event_index = 0;
+	s->fd = fd;
+	s->id = id;
+	return s;
+}
 
-	int i = 0;
-	for(i=0; i<MAX_SOCKET; i++)
+//client fd add to epoll 
+static int start_socket(struct socket_server *ss,struct request_start* reques,struct socket_message* result)
+{
+	int id = reques.msg.start.id; 
+	result.id = fd;
+	result->ud = 0;
+	result->data = NULL;
+	struct socket *s = ss->socket_pool[id % MAX_SOCKET];  
+	if(s->type == SOCKET_TYPE_INVALID || s->id = !id) //
 	{
-		struct socket *s = &ss->socket_pool[i];
-		s->fd = 0;
-		s->id = 0;
+		return SOCKET_ERROR;
 	}
-
+	if (s->type == SOCKET_TYPE_PACCEPT || s->type == SOCKET_TYPE_PLISTEN) 
+	{
+		if(epoll_add(ss->epoll_fd,s->fd,s->fd,s) == -1)
+		{
+			s->type = SOCKET_TYPE_INVALID;
+			return SOCKET_ERROR;
+		}
+		s->type = (s->type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN;//change
+		result->data = "start";
+		return SOCKET_SUCCESS;//成功加入到 epoll 中管理。
+	}
 }
 
 static int do_listen(const char* host,int port,int backlog)
@@ -149,61 +178,119 @@ _err:
 	return -1;  
 }
 
+//为 listen_fd 申请 socket_pool 中一个成员
+static int listen_socket(struct socket_server *ss,int listen_fd,int id)
+{
+	struct socket *s = apply_socket(ss,listen_fd,id);
+	if(s == NULL)
+	{
+		fprintf(ERR_FILE,"listen_id apply socket failed\n"); 
+		goto _err:
+	}  
+	s->type = SOCKET_TYPE_PACCEPT;//未放入 epoll 中管理
+	return 0;
+_err:
+	close(listen_fd);
+	ss->socket_pool[id % MAX_SOCKET].type = SOCKET_TYPE_INVALID; //return to pool
+	return -1;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+struct socket_server* socket_server_create()
+{
+	int efd = epoll_init();
+	if(efd_err(efd))
+	{
+		fprintf(ERR_FILE,"epoll create failed\n");
+		return NULL;
+	}
+
+	struct socket_server *ss = malloc(sizeof(*ss));
+	ss->epoll_fd = efd;
+	ss->event_n = 0;
+	ss->socket_pool = (struct socket*)malloc(sizeof(struct socket)*MAX_SOCKET);
+	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
+	if((!ss->socket_pool) || (!ss->event_pool))
+	{
+		fprintf(ERR_FILE,"socket_pool or event_pool malloc failed");
+		return NULL;
+	}
+	ss->event_index = 0;
+
+	int i = 0;
+	for(i=0; i<MAX_SOCKET; i++)
+	{
+		struct socket *s = &ss->socket_pool[i];
+		s->fd = 0;
+		s->id = 0;
+	}
+
+}
+
+
+
 int socket_server_listen(struct socket_server *ss,const char* host,int port,int backlog)
 {
-	int fd = do_listen(host,port,backlog);
-	if(fd < 0)
+	int listen_fd = do_listen(host,port,backlog);
+	if(listen_fd == -1)
 	{
 	   return -1;
 	}
+	int id = apply_id();
+	if(listen_socket(ss,listen_fd,id) == 0)
+	{
+		return id;
+	}
+	return -1;
 }
 
 int socket_server_event(struct socket_server *ss, struct socket_message * result)
 {
-    ss->event_n = sepoll_wait(ss->epoll_fd,);
-}
-
-//id from 0-2^31-1
-static int apply_id()
-{
-	static int id = 0;
-	id ++;
-	if(id < 0) 
+	for( ; ; )
 	{
-		id = 1;
+		if(ss->event_index == ss->event_n)  //all event was done,call sepoll_wait again
+		{
+			ss->event_n = sepoll_wait(ss->epoll_fd,ss->event_pool,MAX_EVENT);
+			if(ss->event_n <= 0) //err
+			{
+				ss->event_n = 0;
+				return -1;
+			}	
+			ss->event_index = 0;
+		}
+		struct event* eve = ss->event_pool[ss->event_index++];
+		
 	}
-	return id;
+    
+    
 }
 
-//fd->epoll
+
 void socket_server_start(struct socket_server *ss,int id)
 {
 	struct request_package request;
 	request.msg.start.id = id;
+
+	struct socket *s = &ss->socket_pool[id % MAX_SOCKET];
+	epoll_add(ss->epoll_fd,s->fd,s); //待补充，此处代码不合理
 }
 
-//client fd->epoll 
-static int start_socket(struct socket_server *ss,struct request_start* reques,struct socket_message* result)
+
+
+
+
+void socket_server_release(struct socket_server *ss)
 {
-	int id = reques.msg.start.id; 
-	result.id = fd;
-	result->ud = 0;
-	result->data = NULL;
-	struct socket *s = ss->socket_pool[id % MAX_SOCKET];  
-	if(s->type == SOCKET_TYPE_INVALID || s->id = !id) //
+	int i = 0;
+	struct socket *s = NULL;
+	for(i=0; i<MAX_SOCKET; i++)
 	{
-		return SOCKET_ERROR;
+		s = ss->socket_pool[i];
+		close(s->fd);
 	}
-	if (s->type == SOCKET_TYPE_PACCEPT || s->type == SOCKET_TYPE_PLISTEN) 
-	{
-		if(epoll_add(ss->epoll_fd,s->fd,s->fd,s) == -1)
-		{
-			s->type = SOCKET_TYPE_INVALID;
-			return SOCKET_ERROR;
-		}
-		s->type = (s->type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN;//change
-		result->data = "start";
-		return SOCKET_SUCCESS;
-	}
+	epoll_release(ss->epoll_fd);	
+	free(ss->socket_pool);
+	free(ss->event_pool);
+	free(ss);
 }
-

@@ -7,6 +7,7 @@
 #define SOCKET_ACCEPT 3			// 被动连接建立（即accept成功返回已连接套接字）但未加入到epoll
 #define SOCKET_ERROR 4			// 发生错误
 #define SOCKET_EXIT 5			// 退出事件
+#define SOCKET_IGNORE 6         // 忽略,无需处理
 
 struct socket_message {
 	int id;
@@ -14,7 +15,11 @@ struct socket_message {
 	char * data;
 };
 
-
+struct socket_server* socket_server_create();
+int socket_server_event(struct socket_server *ss, struct socket_message * result);
+int socket_server_listen(struct socket_server *ss,const char* host,int port,int backlog);
+void socket_server_start(struct socket_server *ss,int id);
+void socket_server_release(struct socket_server *ss);
 
 #endif
 

@@ -11,8 +11,9 @@ int epoll_init()
 
 int efd_err(int efd)
 {
-	return efd ==-1;
+	return efd == -1;
 }
+
 int epoll_release(int efd)
 {
    return close(efd);
@@ -38,9 +39,10 @@ void epoll_del(int efd,int sock)
 
 int sepoll_wait(int efd, struct event *e, int max)
 {
+	int i =0;
     struct epoll_event ev[max];
     int ret_n = epoll_wait(efd,ev,max,-1);  //-1没有句柄发生变化，则一直等待
-	for (i=0;i<n;i++) //epoll返回的事件信息存储到自定义的event数组中
+	for (i=0; i<ret_n; i++)                //epoll返回的事件信息存储到自定义的event数组中
 	{
 		e[i].s_p = ev[i].data.ptr;
 		unsigned flag = ev[i].events;
