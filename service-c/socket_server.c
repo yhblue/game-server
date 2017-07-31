@@ -21,16 +21,15 @@
 
 #define MAX_EVENT 64                //epoll_wait一次最多返回64个事件
 #define MAX_SOCKET 64*1024          //最多支持64k个socket连接
+#define SOCKET_READBUFF 64
 
 #define SOCKET_TYPE_INVALID 0		// 无效的套接字
-#define SOCKET_TYPE_RESERVE 1		// 预留，已被申请，即将投入使用 --取消这个类型吧，感觉没什么用
-#define SOCKET_TYPE_PLISTEN 2		// 监听套接字，未加入epoll管理
-#define SOCKET_TYPE_LISTEN  3		// 监听套接字，已加入epoll管理
-#define SOCKET_TYPE_CONNECTING 4	// 尝试连接中的套接字           --取消这个类型吧，感觉没什么用
-#define SOCKET_TYPE_CONNECTED  5	// 已连接套接，主动或被动(connect,accept成功，并已加入epoll管理)
+#define SOCKET_TYPE_LISTEN_NOTADD 2		// 监听套接字，未加入epoll管理
+#define SOCKET_TYPE_LISTEN_ADD   3		// 监听套接字，已加入epoll管理
+#define SOCKET_TYPE_CONNECT_ADD  5	// 已连接套接，主动或被动(connect,accept成功，并已加入epoll管理)
 #define SOCKET_TYPE_HALFCLOSE  6	// 应用层已发起关闭套接字请求，应用层发送缓冲区尚未发送完，未调用close
-#define SOCKET_TYPE_PACCEPT 7		// accept返回的已连接套接字，但未加入epoll管理
-#define SOCKET_TYPE_OTHER   8		// 其它类型的文件描述符，比如stdin,stdout等
+#define SOCKET_TYPE_CONNECT_NOTADD 7		// accept返回的已连接套接字，但未加入epoll管理
+#define SOCKET_TYPE_OTHER          8		// 其它类型的文件描述符，比如stdin,stdout等
 
 struct socket
 {
@@ -120,7 +119,7 @@ static void socket_keepalive(int fd)
 }
 
 //client fd add to epoll 
-static int start_socket(struct socket_server *ss,struct request_start* reques,struct socket_message* result)
+static int start_socket(struct socket_server *ss,struct socket_message* result)
 {
 	int id = reques->id;
 	result->id = id;
@@ -131,14 +130,14 @@ static int start_socket(struct socket_server *ss,struct request_start* reques,st
 	{
 		return SOCKET_ERROR;
 	}
-	if (s->type == SOCKET_TYPE_PACCEPT || s->type == SOCKET_TYPE_PLISTEN) 
+	if (s->type == SOCKET_TYPE_CONNECT_NOTADD || s->type == SOCKET_TYPE_LISTEN_NOTADD) 
 	{
 		if(epoll_add(ss->epoll_fd,s->fd,s) == -1)
 		{
 			s->type = SOCKET_TYPE_INVALID;
 			return SOCKET_ERROR;
 		}
-		s->type = (s->type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN;//change
+		s->type = (s->type == SOCKET_TYPE_CONNECT_NOTADD) ? SOCKET_TYPE_CONNECT_ADD : SOCKET_TYPE_LISTEN_ADD;//change
 		result->data = "start";
 		return SOCKET_SUCCESS;//成功加入到 epoll 中管理。
 	}
@@ -194,7 +193,7 @@ static int listen_socket(struct socket_server *ss,int listen_fd,int id)
 		fprintf(ERR_FILE,"listen_id apply socket failed\n"); 
 		goto _err;
 	}  
-	s->type = SOCKET_TYPE_PACCEPT;//未放入 epoll 中管理
+	s->type = SOCKET_TYPE_CONNECT_NOTADD;//未放入 epoll 中管理
 	return 0;
 _err:
 	close(listen_fd);
@@ -225,18 +224,75 @@ static int dispose_accept(struct socket_server *ss,struct socket *s,struct socke
 	if(cs == NULL) //
 	{
 		close(client_fd);
-		fprintf(ERR_FILE,"set set_nonblock failed\n");
+		fprintf(ERR_FILE,"apply socket from pool failed\n");
 		return -1;
 	}
-	cs->type = SOCKET_TYPE_PACCEPT;
+	cs->type = SOCKET_TYPE_CONNECT_NOTADD;
 	result->id = id;
 	result->lid_size = listen_fd;
 	result->data = NULL;
 	return 0;   
-}//2017/7/28 20:56
+}
 
+static int send_buffer(struct socket_server* ss)
+{
+	return 0;
+}
+
+static void close_fd(struct socket_server *ss,struct socket *s)
+{
+	if(s->type == SOCKET_TYPE_INVALID)
+	{
+		return;
+	}
+	if(s->type!=SOCKET_TYPE_LISTEN_NOTADD || s->type!=SOCKET_TYPE_CONNECT_NOTADD)
+	{
+		if(epoll_del(ss->epoll_fd,s->fd) == -1)
+		{
+			fprintf(ERR_FILE,"epoll_del failed s->fd=%d\n",s->fd);
+		}
+	}
+	s->lid_size = 0;
+	s->data = NULL;
+	close(s->fd);
+	s-type = SOCKET_TYPE_INVALID;
+}
+
+//处理epoll的可读事件
+static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct socket_message * result)
+{
+	int size = SOCKET_READBUFF;
+	char* buffer = (char*)malloc(size);
+	int n = (int)read(s->fd,buffer,size);
+	if(n < 0)
+	{
+		free(buffer);
+		switch(errno)
+		{
+			case EINTR:
+				break;//等待下一次再读取吧
+			case EAGAIN:
+				fprintf(ERR_FILE,"socket read, EAGAIN\n");
+				break；
+			default:
+				close_fd(ss,s);
+				return SOCKET_ERROR;			
+		}
+		return -1;
+	}
+	if(n == 0) //client close
+	{
+		free(buffer);
+		close_fd(ss,s);
+		return SOCKET_CLOSE;
+	}
+
+	result->id = s->id;
+	result->lid_size = n;
+	result->data = buffer;
+	return SOCKET_DATA;
+}
 //--------------------------------------------------------------------------------------------------
-
 struct socket_server* socket_server_create()
 {
 	int efd = epoll_init();
@@ -299,23 +355,61 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 			ss->event_index = 0;
 		}
 		struct event* eve = &ss->event_pool[ss->event_index++];
-		struct socket *s = e->s_p; //socket_pool 中成员
+		struct socket *s = eve->s_p; //指向了产生可读事件的fd注册到epoll时候分配的socket_pool中成员
 		switch(s->type) //判断哪一类型的socket发生变化
 		{
-			case SOCKET_TYPE_LISTEN: //client connect
-
+			case SOCKET_TYPE_LISTEN_ADD: //client connect
+				if(dispose_accept() == 0)
+				{
+					return SOCKET_ACCEPT;			
+				}
+				break;
+			case SOCKET_TYPE_INVALID:
+				fprintf(ERR_FILE,"a invalied socket from pool\n");
+				break;
+			case SOCKET_TYPE_CONNECT_ADD:
+				if(s->read)
+				{
+					int ret_type = dispose_readmessage(ss,s,result);
+					if(ret_type == -1)
+					{
+						break; 
+					}
+					return ret_type;
+				}
+				if(s->write)
+				{
+					send_buffer(ss);
+				}
+				break;
 		}
 	}
 }
 
 
-void socket_server_start(struct socket_server *ss,int id)
+void socket_server_start(struct socket_server *ss,int id,struct socket_message * result)
 {
-	struct request_package request;
-	request.msg.start.id = id;
-
-	struct socket *s = &ss->socket_pool[id % MAX_SOCKET];
-	epoll_add(ss->epoll_fd,s->fd,s); //待补充，此处代码不合理
+	result->id = id;
+	result->lid_size = 0;
+	result->data = NULL;
+	struct socket *s = &ss->socket_pool[id % MAX_SOCKET];  
+	
+	if(s->type == SOCKET_TYPE_INVALID) //
+	{
+		return SOCKET_ERROR;
+	}
+	if (s->type == SOCKET_TYPE_CONNECT_NOTADD || s->type == SOCKET_TYPE_LISTEN_NOTADD) 
+	{
+		if(epoll_add(ss->epoll_fd,s->fd,s) == -1)
+		{
+			s->type = SOCKET_TYPE_INVALID;
+			return SOCKET_ERROR;
+		}
+		s->type = (s->type == SOCKET_TYPE_CONNECT_NOTADD) ? SOCKET_TYPE_CONNECT_ADD : SOCKET_TYPE_LISTEN_ADD;//change
+		result->data = "start";
+		return SOCKET_SUCCESS;//成功加入到 epoll 中管理。
+	}
+	return SOCKET_ERROR;
 }
 
 
@@ -327,7 +421,7 @@ void socket_server_release(struct socket_server *ss)
 	for(i=0; i<MAX_SOCKET; i++)
 	{
 		s = &ss->socket_pool[i];
-		if(s->type == SOCKET_TYPE_CONNECTED || s->type == SOCKET_TYPE_LISTEN)
+		if(s->type == SOCKET_TYPE_CONNECT_ADD || s->type == SOCKET_TYPE_LISTEN_ADD)
 		{
 			epoll_del(ss->epoll_fd,s->id);
 		}

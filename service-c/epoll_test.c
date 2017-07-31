@@ -25,6 +25,7 @@ int main()
 				goto _EXIT;
 			case SOCKET_DATA:
 				printf("data[id=%d],size=%d,%s\n",result.id,result.lid_size,result.data);
+				free(result->data);
 				break;
 			case SOCKET_ACCEPT://client connect
 				printf("accept[id=%d] from [id=%d]",result.id,result.lid_size);
@@ -34,7 +35,8 @@ int main()
 				printf("closed[id=%d]",result.id);
 				break;
 			case SOCKET_SUCCESS:	
-				printf("success[id=%d],data=%s\n",result.id,result.data);
+				printf("success[id=%d] add to epoll,data=%s\n",result.id,result.data);
+				break;
 		}
 	}
 _EXIT:
