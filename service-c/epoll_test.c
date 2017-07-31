@@ -1,6 +1,6 @@
 #include "socket_server.h"
 #include "socket_epoll.h"
-
+#include <stdlib.h>
 #include <stdio.h>
 
 int main()
@@ -25,17 +25,17 @@ int main()
 				goto _EXIT;
 			case SOCKET_DATA:
 				printf("data[id=%d],size=%d,%s\n",result.id,result.lid_size,result.data);
-				free(result->data);
+				free(result.data);
 				break;
 			case SOCKET_ACCEPT://client connect
 				printf("accept[id=%d] from [id=%d]",result.id,result.lid_size);
-				socket_server_start(ss,result.lid_size);  //add to epoll
+				socket_server_start(ss,result.id);  //add to epoll
 				break;		
 			case SOCKET_CLOSE:
 				printf("closed[id=%d]",result.id);
 				break;
 			case SOCKET_SUCCESS:	
-				printf("success[id=%d] add to epoll,data=%s\n",result.id,result.data);
+				printf("success[id=%d] add to epoll\n",result.id);
 				break;
 		}
 	}

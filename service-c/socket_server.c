@@ -19,6 +19,7 @@
 #include <string.h>
 
 
+
 #define MAX_EVENT 64                //epoll_wait一次最多返回64个事件
 #define MAX_SOCKET 64*1024          //最多支持64k个socket连接
 #define SOCKET_READBUFF 64
@@ -47,11 +48,6 @@ struct socket_server
     int event_index;             //from 0 to 63
 };
 
-struct request_start
-{
-	int id;
-};
-
 struct request_close 
 {
 	int id;
@@ -72,7 +68,6 @@ struct request_package
 		char buffer[256];
 		//struct request_open open;
 		struct request_send send;
-		struct request_start start;
 		struct request_close close;	
 	}msg;
 };
@@ -114,35 +109,10 @@ static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool a
 
 static void socket_keepalive(int fd)
 {
-	int keepalive = 1;
-	setsockopt(fd,SOL_SOCKET,SO_KEEPALIVE,sizeof(keepalive));	　　　　　　
+	int keep_alive = 1;
+	setsockopt(fd,SOL_SOCKET,SO_KEEPALIVE,(void*)&keep_alive,sizeof(keep_alive));
 }
 
-//client fd add to epoll 
-static int start_socket(struct socket_server *ss,struct socket_message* result)
-{
-	int id = reques->id;
-	result->id = id;
-	result->lid_size = 0;
-	result->data = NULL;
-	struct socket *s = &ss->socket_pool[id % MAX_SOCKET];  
-	if(s->type == SOCKET_TYPE_INVALID || s->id != id) //
-	{
-		return SOCKET_ERROR;
-	}
-	if (s->type == SOCKET_TYPE_CONNECT_NOTADD || s->type == SOCKET_TYPE_LISTEN_NOTADD) 
-	{
-		if(epoll_add(ss->epoll_fd,s->fd,s) == -1)
-		{
-			s->type = SOCKET_TYPE_INVALID;
-			return SOCKET_ERROR;
-		}
-		s->type = (s->type == SOCKET_TYPE_CONNECT_NOTADD) ? SOCKET_TYPE_CONNECT_ADD : SOCKET_TYPE_LISTEN_ADD;//change
-		result->data = "start";
-		return SOCKET_SUCCESS;//成功加入到 epoll 中管理。
-	}
-	return SOCKET_ERROR;
-}
 
 static int do_listen(const char* host,int port,int backlog)
 {
@@ -229,8 +199,8 @@ static int dispose_accept(struct socket_server *ss,struct socket *s,struct socke
 	}
 	cs->type = SOCKET_TYPE_CONNECT_NOTADD;
 	result->id = id;
-	result->lid_size = listen_fd;
-	result->data = NULL;
+	result->lid_size = s->id;//listen_id
+	result->data = "accept new client";
 	return 0;   
 }
 
@@ -252,10 +222,9 @@ static void close_fd(struct socket_server *ss,struct socket *s)
 			fprintf(ERR_FILE,"epoll_del failed s->fd=%d\n",s->fd);
 		}
 	}
-	s->lid_size = 0;
-	s->data = NULL;
+	s->id = 0;
 	close(s->fd);
-	s-type = SOCKET_TYPE_INVALID;
+	s->type = SOCKET_TYPE_INVALID;
 }
 
 //处理epoll的可读事件
@@ -273,7 +242,7 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 				break;//等待下一次再读取吧
 			case EAGAIN:
 				fprintf(ERR_FILE,"socket read, EAGAIN\n");
-				break；
+				break;
 			default:
 				close_fd(ss,s);
 				return SOCKET_ERROR;			
@@ -359,7 +328,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		switch(s->type) //判断哪一类型的socket发生变化
 		{
 			case SOCKET_TYPE_LISTEN_ADD: //client connect
-				if(dispose_accept() == 0)
+				if(dispose_accept(ss,s,result) == 0)
 				{
 					return SOCKET_ACCEPT;			
 				}
@@ -368,7 +337,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 				fprintf(ERR_FILE,"a invalied socket from pool\n");
 				break;
 			case SOCKET_TYPE_CONNECT_ADD:
-				if(s->read)
+				if(eve->read)
 				{
 					int ret_type = dispose_readmessage(ss,s,result);
 					if(ret_type == -1)
@@ -377,7 +346,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 					}
 					return ret_type;
 				}
-				if(s->write)
+				if(eve->write)
 				{
 					send_buffer(ss);
 				}
@@ -387,11 +356,8 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 }
 
 
-void socket_server_start(struct socket_server *ss,int id,struct socket_message * result)
+int socket_server_start(struct socket_server *ss,int id)
 {
-	result->id = id;
-	result->lid_size = 0;
-	result->data = NULL;
 	struct socket *s = &ss->socket_pool[id % MAX_SOCKET];  
 	
 	if(s->type == SOCKET_TYPE_INVALID) //
@@ -406,12 +372,10 @@ void socket_server_start(struct socket_server *ss,int id,struct socket_message *
 			return SOCKET_ERROR;
 		}
 		s->type = (s->type == SOCKET_TYPE_CONNECT_NOTADD) ? SOCKET_TYPE_CONNECT_ADD : SOCKET_TYPE_LISTEN_ADD;//change
-		result->data = "start";
 		return SOCKET_SUCCESS;//成功加入到 epoll 中管理。
 	}
 	return SOCKET_ERROR;
 }
-
 
 
 void socket_server_release(struct socket_server *ss)

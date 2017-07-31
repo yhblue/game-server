@@ -19,7 +19,7 @@ struct socket_message {
 struct socket_server* socket_server_create();
 int socket_server_event(struct socket_server *ss, struct socket_message * result);
 int socket_server_listen(struct socket_server *ss,const char* host,int port,int backlog);
-void socket_server_start(struct socket_server *ss,int id);
+int socket_server_start(struct socket_server *ss,int id);
 void socket_server_release(struct socket_server *ss);
 
 #endif
