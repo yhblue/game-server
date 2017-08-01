@@ -18,4 +18,5 @@ int epoll_add(int efd, int sock, void *ud);
 int epoll_del(int efd,int sock);
 int sepoll_wait(int efd, struct event *e, int max);
 int set_nonblock(int fd);
+void epoll_write(int efd,int sock,void* ud,bool write);
 #endif

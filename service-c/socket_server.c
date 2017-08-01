@@ -24,19 +24,30 @@
 #define MAX_SOCKET 64*1024          //最多支持64k个socket连接
 #define SOCKET_READBUFF 64
 
-#define SOCKET_TYPE_INVALID 0		// 无效的套接字
+#define SOCKET_TYPE_INVALID 0		    // 无效的套接字
 #define SOCKET_TYPE_LISTEN_NOTADD 2		// 监听套接字，未加入epoll管理
 #define SOCKET_TYPE_LISTEN_ADD   3		// 监听套接字，已加入epoll管理
-#define SOCKET_TYPE_CONNECT_ADD  5	// 已连接套接，主动或被动(connect,accept成功，并已加入epoll管理)
-#define SOCKET_TYPE_HALFCLOSE  6	// 应用层已发起关闭套接字请求，应用层发送缓冲区尚未发送完，未调用close
+#define SOCKET_TYPE_CONNECT_ADD  5	    // 已连接套接，主动或被动(connect,accept成功，并已加入epoll管理)
+#define SOCKET_TYPE_HALFCLOSE  6	    // 应用层已发起关闭套接字请求，应用层发送缓冲区尚未发送完，未调用close
 #define SOCKET_TYPE_CONNECT_NOTADD 7		// accept返回的已连接套接字，但未加入epoll管理
 #define SOCKET_TYPE_OTHER          8		// 其它类型的文件描述符，比如stdin,stdout等
+
+struct append_buffer
+{
+	struct append_buffer* next;
+	void* buffer;//in order to free memery
+	void* current;
+	int size;
+};
 
 struct socket
 {
 	int fd;       //socket fd  
 	int id;       //id
 	int type;     //socket type
+	int remain_size;
+	struct append_buffer* head;
+	struct append_buffer* tail;
 };
 
 struct socket_server 
@@ -56,7 +67,7 @@ struct request_close
 struct request_send
 {
 	int id;
-	int sz;
+	int size;
 	char * buffer;
 };
 
@@ -73,6 +84,28 @@ struct request_package
 };
 
 //---------------------------------------------------------------------------------------------------------------------------
+
+static int append_remaindata(struct socket *s,struct request_send * request,int start)
+{
+	struct append_buffer* node = (append_buffer*)malloc(struct write_buffer);
+	if(append_buffer == NULL)
+		return -1;
+	node->current = request->buffer + start;
+	node->size = request->size - start;
+	node->buffer = request->buffer;
+	node->next = NULL;
+	s->remain_size += node->size;
+	if(s->head == NULL)
+	{
+		s->head = s->tail = node;
+	}
+	else
+	{
+		s->tail->next = node;
+		s->tail = node;
+	}
+}
+
 
 //id from 1-2^31-1
 static int apply_id()
@@ -207,11 +240,7 @@ static int dispose_accept(struct socket_server *ss,struct socket *s,struct socke
 	return 0;   
 }
 
-static int send_buffer(struct socket_server* ss)
-{
-	return 0;
-}
-
+//这个函数要修改，增加内存泄露管理
 static void close_fd(struct socket_server *ss,struct socket *s,struct socket_message * result)
 {
 	if(s->type == SOCKET_TYPE_INVALID)
@@ -227,6 +256,7 @@ static void close_fd(struct socket_server *ss,struct socket *s,struct socket_mes
 	}
 	result->id = s->id;
 	result->data = "close";
+
 	s->id = 0;
 	close(s->fd);
 	s->type = SOCKET_TYPE_INVALID;
@@ -251,7 +281,7 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 				fprintf(ERR_FILE,"socket read, EAGAIN\n");
 				break;
 			default:
-				close_fd(ss,s);
+				close_fd(ss,s,result);
 				return SOCKET_ERROR;			
 		}
 		return -1;
@@ -259,7 +289,7 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 	if(n == 0) //client close,important
 	{
 		free(buffer);
-		close_fd(ss,s);
+		close_fd(ss,s,result);
 		return SOCKET_CLOSE;
 	}
 
@@ -268,7 +298,8 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 	result->data = buffer;
 	return SOCKET_DATA;
 }
-//--------------------------------------------------------------------------------------------------
+
+//-------------------------------------------------------------------------------------------------------------------------
 struct socket_server* socket_server_create()
 {
 	int efd = epoll_init();
@@ -425,4 +456,107 @@ void socket_server_release(struct socket_server *ss)
 	free(ss->socket_pool);
 	free(ss->event_pool);
 	free(ss);
+}
+
+
+//管道中接收到其他进程发过了的写socket操作调用。
+int socket_server_send(struct socket_server* ss,struct request_send * request,struct socket_message *result)
+{
+	int id = request->id;
+	struct socket * s = &ss->socket_pool[id % MAX_SOCKET];
+	if(s->type != SOCKET_TYPE_CONNECT_ADD) //加入管道通信功能后这里可能要修改
+	{
+		if(request->buffer != NULL)
+		{
+			free(request->buffer);
+			request->buffer = NULL;			
+		}
+		return -1;
+	}
+	if(s->head == NULL)
+	{
+		int n = write(s->fd,request->buffer,request->sz);
+		if(n == -1)
+		{
+			switch(errno)
+			{
+				case EINTR:
+				case EAGAIN:
+					n = 0;
+					break;
+				default:
+					fprintf(stderr, "socket_server_send: write to %d (fd=%d) error.",id,s->fd);
+					close_fd(ss,s,result);
+					if(request->buffer != NULL)
+					{
+						free(request->buffer);
+						request->buffer = NULL;
+					}
+					return -1;
+			}
+		}
+		if(n == request->sz)
+		{
+			if(request->buffer != NULL)
+			{
+				free(request->buffer);
+				request->buffer = NULL;
+			}		
+			return 0;
+		}
+		if(n < request->sz)
+		{
+			append_remaindata(s,request,n);  //
+			epoll_write(ss->epoll_fd,s->fd,true);
+		}		
+	}
+	else
+	{
+		append_remaindata(s,request,0)
+	}
+	return 0;
+}
+
+static int send_data(struct socket_server* ss,struct socket *s,struct socket_message *result)
+{
+	while(s->head)
+	{
+		struct write_buffer * tmp = s->head;
+		for( ; ; )
+		{
+			int n = write(s->fd,tmp->current,tmp->size);
+			if(n == -1)
+			{
+				switch(errno)
+				{
+					case EINTR:
+						continue;
+					case EAGAIN:
+						return -1;
+					default:
+					fprintf(stderr, "send_data: write to %d (fd=%d) error.",id,s->fd);
+					close_fd(ss,s,result);
+					return -1;
+				}
+			}
+			s->remain_size -= n;
+			if(n != tmp->size)   //未完全发送完
+			{
+				tmp->current += n;
+				tmp->remain_size -= n; 
+			}
+			if(n == tmp->size)
+			{
+				s->head = tmp->next;
+				if(tmp->buffer != NULL)
+				{
+					free(tmp->buffer);
+					free(tmp); //last s->head node 
+				}
+			}
+		}
+	}	
+	s->tail = NULL;
+	epoll_write(ss,s,result,false);
+	return 0;
 }

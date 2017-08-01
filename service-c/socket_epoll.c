@@ -72,3 +72,19 @@ int set_nonblock(int fd)
 	}
 	return 0;
 }
+
+
+
+int epoll_write(int efd,int sock,void* ud,bool write)
+{
+	struct epoll_event ev;
+	ev.events = EPOLLIN | (write ? EPOLLOUT : 0);
+	ev.data.ptr = ud;
+	if(epoll_ctl(efd, EPOLL_CTL_MOD, sock, &ev) == -1)
+	{
+		return -1;
+	}	
+	return 0;
+}
+
+
