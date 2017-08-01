@@ -333,6 +333,9 @@ struct socket_server* socket_server_create()
 		s->fd = 0;
 		s->id = 0;
 		s->type = SOCKET_TYPE_INVALID;
+		s->remain_size = 0;
+		s->head = NULL;
+		S->tail = NULL;
 	}
 	return ss;
 }
