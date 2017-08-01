@@ -166,7 +166,7 @@ static int listen_socket(struct socket_server *ss,int listen_fd,int id)
 		fprintf(ERR_FILE,"listen_id apply socket failed\n"); 
 		goto _err;
 	}  
-	s->type = SOCKET_TYPE_CONNECT_NOTADD;//未放入 epoll 中管理
+	s->type = SOCKET_TYPE_LISTEN_NOTADD;//未放入 epoll 中管理
 	return 0;
 _err:
 	close(listen_fd);
@@ -212,7 +212,7 @@ static int send_buffer(struct socket_server* ss)
 	return 0;
 }
 
-static void close_fd(struct socket_server *ss,struct socket *s)
+static void close_fd(struct socket_server *ss,struct socket *s,struct socket_message * result)
 {
 	if(s->type == SOCKET_TYPE_INVALID)
 	{
@@ -225,6 +225,8 @@ static void close_fd(struct socket_server *ss,struct socket *s)
 			fprintf(ERR_FILE,"epoll_del failed s->fd=%d\n",s->fd);
 		}
 	}
+	result->id = s->id;
+	result->data = "close";
 	s->id = 0;
 	close(s->fd);
 	s->type = SOCKET_TYPE_INVALID;
@@ -235,6 +237,7 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 {
 	int size = SOCKET_READBUFF;
 	char* buffer = (char*)malloc(size);
+	memset(buffer,0,size);
 	int n = (int)read(s->fd,buffer,size);
 	if(n < 0)
 	{
@@ -284,7 +287,7 @@ struct socket_server* socket_server_create()
 		fprintf(ERR_FILE,"socket_pool malloc failed\n");
 	}
 	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
-	if(!ss->event_pool == NULL)
+	if(ss->event_pool == NULL)
 	{
 		fprintf(ERR_FILE,"event_pool malloc failed\n");
 		return NULL;
@@ -298,6 +301,7 @@ struct socket_server* socket_server_create()
 		s = &ss->socket_pool[i];
 		s->fd = 0;
 		s->id = 0;
+		s->type = SOCKET_TYPE_INVALID;
 	}
 	return ss;
 }
@@ -310,6 +314,7 @@ int socket_server_listen(struct socket_server *ss,const char* host,int port,int 
 	{
 	   return -1;
 	}
+	printf("listen_fd = %d\n",listen_fd);
 	int id = apply_id();
 	if(listen_socket(ss,listen_fd,id) == 0)
 	{
@@ -322,8 +327,10 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 {
 	for( ; ; )
 	{
+		printf("test\n");
 		if(ss->event_index == ss->event_n)  //all event was done,call sepoll_wait again
 		{
+			printf("start sepoll_wait function!\n");
 			ss->event_n = sepoll_wait(ss->epoll_fd,ss->event_pool,MAX_EVENT);
 			if(ss->event_n <= 0) //err
 			{
@@ -331,9 +338,13 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 				return -1;
 			}	
 			ss->event_index = 0;
+			printf("end sepoll_wait dispath! ss->event_n = %d\n",ss->event_n);
 		}
 		struct event* eve = &ss->event_pool[ss->event_index++];
 		struct socket *s = eve->s_p; //指向了产生可读事件的fd注册到epoll时候分配的socket_pool中成员
+		printf("s->type = %d\n",s->type);
+		printf("s->fd = %d\n",s->fd);
+		printf("s->id = %d\n",s->id);
 		switch(s->type) //判断哪一类型的socket发生变化
 		{
 			case SOCKET_TYPE_LISTEN_ADD: //client connect
@@ -382,12 +393,15 @@ int socket_server_start(struct socket_server *ss,int id)
 	}
 	if (s->type == SOCKET_TYPE_CONNECT_NOTADD || s->type == SOCKET_TYPE_LISTEN_NOTADD) 
 	{
+		printf("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+		printf("socket_server_start s->type = %d\n",s->type);
 		if(epoll_add(ss->epoll_fd,s->fd,s) == -1)
 		{
 			s->type = SOCKET_TYPE_INVALID;
 			return SOCKET_ERROR;
 		}
 		s->type = (s->type == SOCKET_TYPE_CONNECT_NOTADD) ? SOCKET_TYPE_CONNECT_ADD : SOCKET_TYPE_LISTEN_ADD;//change
+		printf("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
 		return SOCKET_SUCCESS;//成功加入到 epoll 中管理。
 	}
 	return SOCKET_ERROR;

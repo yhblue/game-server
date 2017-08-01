@@ -5,15 +5,17 @@
 
 int main()
 {
+	unsigned int times = 0;
 	struct socket_server* ss = socket_server_create();
 	if(ss == NULL)
 		return -1;
 
 	int listen_id = socket_server_listen(ss,"127.0.0.1",8888,32);
+	printf("listen_id = %d\n",listen_id);
 	if(listen_id == -1)
 		return -1;
 	socket_server_start(ss,listen_id);
-	
+
 	struct socket_message result;
 	for ( ; ; )
 	{
@@ -36,6 +38,10 @@ int main()
 				break;
 			case SOCKET_SUCCESS:	
 				printf("success[id=%d] add to epoll\n",result.id);
+				break;
+			default:
+				if(times % 1000 == 0)
+					printf("nothing!\n");
 				break;
 		}
 	}
