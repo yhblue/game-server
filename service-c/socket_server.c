@@ -90,6 +90,10 @@ static int apply_id()
 static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool add_epoll)
 {
 	struct socket* s = &ss->socket_pool[id % MAX_SOCKET];
+	if(s == NULL)
+	{
+	 	return NULL;
+	}
 
 	assert(s->type == SOCKET_TYPE_INVALID);
 
@@ -114,7 +118,7 @@ static void socket_keepalive(int fd)
 }
 
 
-static int do_listen(const char* host,int port,int backlog)
+static int do_listen(const char* host,int port,int max_connect)
 {
     int  listen_fd;
     listen_fd = socket(AF_INET,SOCK_STREAM,0);
@@ -128,7 +132,6 @@ static int do_listen(const char* host,int port,int backlog)
     bzero(&serv_addr,sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;  //ipv4
     serv_addr.sin_addr.s_addr = inet_addr(host);
- //   inet_pton(AF_INET,host,&servaddr.sin_addr); //字符串->网络字节流  
     serv_addr.sin_port = htons(port);              //主机->网络
 
     int optval = 1;
@@ -142,7 +145,7 @@ static int do_listen(const char* host,int port,int backlog)
         fprintf(ERR_FILE,"bind failed\n");  
         goto _err;      
     }
-	if (listen(listen_fd, backlog) == -1) 
+	if (listen(listen_fd, max_connect) == -1) 
 	{
 		fprintf(ERR_FILE,"listen failed\n"); 
 		goto _err;
@@ -239,7 +242,8 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 		switch(errno)
 		{
 			case EINTR:
-				break;//等待下一次再读取吧
+				fprintf(ERR_FILE,"socket read,EINTR\n");
+				break;    // wait for next time
 			case EAGAIN:
 				fprintf(ERR_FILE,"socket read, EAGAIN\n");
 				break;
@@ -249,7 +253,7 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 		}
 		return -1;
 	}
-	if(n == 0) //client close
+	if(n == 0) //client close,important
 	{
 		free(buffer);
 		close_fd(ss,s);
@@ -275,18 +279,23 @@ struct socket_server* socket_server_create()
 	ss->epoll_fd = efd;
 	ss->event_n = 0;
 	ss->socket_pool = (struct socket*)malloc(sizeof(struct socket)*MAX_SOCKET);
-	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
-	if((!ss->socket_pool) || (!ss->event_pool))
+	if(ss->socket_pool == NULL)
 	{
-		fprintf(ERR_FILE,"socket_pool or event_pool malloc failed\n");
+		fprintf(ERR_FILE,"socket_pool malloc failed\n");
+	}
+	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
+	if(!ss->event_pool == NULL)
+	{
+		fprintf(ERR_FILE,"event_pool malloc failed\n");
 		return NULL;
 	}
 	ss->event_index = 0;
 
 	int i = 0;
+	struct socket *s = NULL;
 	for(i=0; i<MAX_SOCKET; i++)
 	{
-		struct socket *s = &ss->socket_pool[i];
+		s = &ss->socket_pool[i];
 		s->fd = 0;
 		s->id = 0;
 	}
@@ -350,6 +359,10 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 				{
 					send_buffer(ss);
 				}
+				if(eve->error)
+				{
+					;
+				}
 				break;
 		}
 	}
@@ -359,7 +372,10 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 int socket_server_start(struct socket_server *ss,int id)
 {
 	struct socket *s = &ss->socket_pool[id % MAX_SOCKET];  
-	
+	if(s == NULL)
+	{
+		return SOCKET_ERROR;
+	}
 	if(s->type == SOCKET_TYPE_INVALID) //
 	{
 		return SOCKET_ERROR;
@@ -387,7 +403,7 @@ void socket_server_release(struct socket_server *ss)
 		s = &ss->socket_pool[i];
 		if(s->type == SOCKET_TYPE_CONNECT_ADD || s->type == SOCKET_TYPE_LISTEN_ADD)
 		{
-			epoll_del(ss->epoll_fd,s->id);
+			epoll_del(ss->epoll_fd,s->fd);
 		}
 		close(s->fd);
 	}

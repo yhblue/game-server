@@ -12,8 +12,8 @@ int main()
 	int listen_id = socket_server_listen(ss,"127.0.0.1",8888,32);
 	if(listen_id == -1)
 		return -1;
-
 	socket_server_start(ss,listen_id);
+	
 	struct socket_message result;
 	for ( ; ; )
 	{

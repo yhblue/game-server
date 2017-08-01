@@ -8,6 +8,7 @@ struct event {
 	void * s_p; //指向注册到epoll时候对应的socket_pool的成员
 	bool read;
 	bool write;
+	bool error;
 };
 
 int epoll_init();

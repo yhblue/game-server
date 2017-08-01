@@ -54,6 +54,7 @@ int sepoll_wait(int efd, struct event *e, int max)
 		unsigned flag = ev[i].events;
 		e[i].write = (flag & EPOLLOUT)? 1 : 0;
 		e[i].read = (flag & EPOLLIN)? 1 : 0;
+		e[i].error = (flag & EPOLLERR)? 1 : 0;
     }
     return ret_n;
 }
