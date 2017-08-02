@@ -37,7 +37,7 @@ struct append_buffer
 	struct append_buffer* next;
 	void* buffer;//in order to free memery
 	void* current;
-	int size;
+	int size;   //这块缓冲区中剩余未发送的字节数
 };
 
 struct socket
@@ -45,7 +45,7 @@ struct socket
 	int fd;       //socket fd  
 	int id;       //id
 	int type;     //socket type
-	int remain_size;
+	int remain_size; //缓冲区链表剩余的字节数
 	struct append_buffer* head;
 	struct append_buffer* tail;
 };
@@ -87,8 +87,8 @@ struct request_package
 
 static int append_remaindata(struct socket *s,struct request_send * request,int start)
 {
-	struct append_buffer* node = (append_buffer*)malloc(struct write_buffer);
-	if(append_buffer == NULL)
+	struct append_buffer* node = (struct append_buffer*)malloc(sizeof(struct append_buffer));
+	if(node == NULL)
 		return -1;
 	node->current = request->buffer + start;
 	node->size = request->size - start;
@@ -104,6 +104,7 @@ static int append_remaindata(struct socket *s,struct request_send * request,int 
 		s->tail->next = node;
 		s->tail = node;
 	}
+	return 0;
 }
 
 
@@ -299,7 +300,51 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 	return SOCKET_DATA;
 }
 
-//-------------------------------------------------------------------------------------------------------------------------
+static int send_data(struct socket_server* ss,struct socket *s,struct socket_message *result)
+{
+	while(s->head)
+	{
+		struct append_buffer * tmp = s->head;
+		for( ; ; )
+		{
+			int n = write(s->fd,tmp->current,tmp->size);
+			if(n == -1)
+			{
+				switch(errno)
+				{
+					case EINTR:
+						continue;
+					case EAGAIN:
+						return -1;
+					default:
+					fprintf(stderr, "send_data: write to %d (fd=%d) error.",s->id,s->fd);
+					close_fd(ss,s,result);
+					return -1;
+				}
+			}
+			s->remain_size -= n;
+			if(n != tmp->size)   //未完全发送完
+			{
+				tmp->current += n;
+				tmp->size -= n; 
+			}
+			if(n == tmp->size)
+			{
+				s->head = tmp->next;
+				if(tmp->buffer != NULL)
+				{
+					free(tmp->buffer);
+					free(tmp); //last s->head node 
+				}
+			}
+		}
+	}	
+	s->tail = NULL;
+	epoll_write(ss->epoll_fd,s->fd,s,false);  //写完了，取消关注写事件
+	return 0;
+}
+
+//----------------------------------------------------------------------------------------------------------------------
 struct socket_server* socket_server_create()
 {
 	int efd = epoll_init();
@@ -335,7 +380,7 @@ struct socket_server* socket_server_create()
 		s->type = SOCKET_TYPE_INVALID;
 		s->remain_size = 0;
 		s->head = NULL;
-		S->tail = NULL;
+		s->tail = NULL;
 	}
 	return ss;
 }
@@ -361,10 +406,10 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 {
 	for( ; ; )
 	{
-		printf("test\n");
+//		printf("test\n");
 		if(ss->event_index == ss->event_n)  //all event was done,call sepoll_wait again
 		{
-			printf("start sepoll_wait function!\n");
+//			printf("start sepoll_wait function!\n");
 			ss->event_n = sepoll_wait(ss->epoll_fd,ss->event_pool,MAX_EVENT);
 			if(ss->event_n <= 0) //err
 			{
@@ -372,13 +417,13 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 				return -1;
 			}	
 			ss->event_index = 0;
-			printf("end sepoll_wait dispath! ss->event_n = %d\n",ss->event_n);
+//			printf("end sepoll_wait dispath! ss->event_n = %d\n",ss->event_n);
 		}
 		struct event* eve = &ss->event_pool[ss->event_index++];
 		struct socket *s = eve->s_p; //指向了产生可读事件的fd注册到epoll时候分配的socket_pool中成员
-		printf("s->type = %d\n",s->type);
-		printf("s->fd = %d\n",s->fd);
-		printf("s->id = %d\n",s->id);
+		// printf("s->type = %d\n",s->type);
+		// printf("s->fd = %d\n",s->fd);
+		// printf("s->id = %d\n",s->id);
 		switch(s->type) //判断哪一类型的socket发生变化
 		{
 			case SOCKET_TYPE_LISTEN_ADD: //client connect
@@ -402,7 +447,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 				}
 				if(eve->write)
 				{
-					send_buffer(ss);
+					send_data(ss,s,result);
 				}
 				if(eve->error)
 				{
@@ -478,7 +523,7 @@ int socket_server_send(struct socket_server* ss,struct request_send * request,st
 	}
 	if(s->head == NULL)
 	{
-		int n = write(s->fd,request->buffer,request->sz);
+		int n = write(s->fd,request->buffer,request->size);
 		if(n == -1)
 		{
 			switch(errno)
@@ -498,7 +543,7 @@ int socket_server_send(struct socket_server* ss,struct request_send * request,st
 					return -1;
 			}
 		}
-		if(n == request->sz)
+		if(n == request->size)
 		{
 			if(request->buffer != NULL)
 			{
@@ -507,59 +552,16 @@ int socket_server_send(struct socket_server* ss,struct request_send * request,st
 			}		
 			return 0;
 		}
-		if(n < request->sz)
+		if(n < request->size)
 		{
 			append_remaindata(s,request,n);  //
-			epoll_write(ss->epoll_fd,s->fd,true);
+			epoll_write(ss->epoll_fd,s->fd,s,true);
 		}		
 	}
 	else
 	{
-		append_remaindata(s,request,0)
+		append_remaindata(s,request,0);
 	}
 	return 0;
 }
 
-static int send_data(struct socket_server* ss,struct socket *s,struct socket_message *result)
-{
-	while(s->head)
-	{
-		struct write_buffer * tmp = s->head;
-		for( ; ; )
-		{
-			int n = write(s->fd,tmp->current,tmp->size);
-			if(n == -1)
-			{
-				switch(errno)
-				{
-					case EINTR:
-						continue;
-					case EAGAIN:
-						return -1;
-					default:
-					fprintf(stderr, "send_data: write to %d (fd=%d) error.",id,s->fd);
-					close_fd(ss,s,result);
-					return -1;
-				}
-			}
-			s->remain_size -= n;
-			if(n != tmp->size)   //未完全发送完
-			{
-				tmp->current += n;
-				tmp->remain_size -= n; 
-			}
-			if(n == tmp->size)
-			{
-				s->head = tmp->next;
-				if(tmp->buffer != NULL)
-				{
-					free(tmp->buffer);
-					free(tmp); //last s->head node 
-				}
-			}
-		}
-	}	
-	s->tail = NULL;
-	epoll_write(ss,s,result,false);
-	return 0;
-}

@@ -34,7 +34,7 @@ int main()
 				socket_server_start(ss,result.id);  //add to epoll
 				break;		
 			case SOCKET_CLOSE:
-				printf("closed[id=%d]",result.id);
+				printf("closed[id=%d]\n",result.id);
 				break;
 			case SOCKET_SUCCESS:	
 				printf("success[id=%d] add to epoll\n",result.id);
