@@ -406,10 +406,8 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 {
 	for( ; ; )
 	{
-//		printf("test\n");
-		if(ss->event_index == ss->event_n)  //all event was done,call sepoll_wait again
+		if(ss->event_index == ss->event_n)  
 		{
-//			printf("start sepoll_wait function!\n");
 			ss->event_n = sepoll_wait(ss->epoll_fd,ss->event_pool,MAX_EVENT);
 			if(ss->event_n <= 0) //err
 			{
@@ -417,13 +415,10 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 				return -1;
 			}	
 			ss->event_index = 0;
-//			printf("end sepoll_wait dispath! ss->event_n = %d\n",ss->event_n);
 		}
 		struct event* eve = &ss->event_pool[ss->event_index++];
 		struct socket *s = eve->s_p; //指向了产生可读事件的fd注册到epoll时候分配的socket_pool中成员
-		// printf("s->type = %d\n",s->type);
-		// printf("s->fd = %d\n",s->fd);
-		// printf("s->id = %d\n",s->id);
+
 		switch(s->type) //判断哪一类型的socket发生变化
 		{
 			case SOCKET_TYPE_LISTEN_ADD: //client connect
