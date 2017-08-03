@@ -19,18 +19,17 @@
 #include <string.h>
 
 
-
 #define MAX_EVENT 64                //epoll_wait一次最多返回64个事件
 #define MAX_SOCKET 64*1024          //最多支持64k个socket连接
 #define SOCKET_READBUFF 64
 
-#define SOCKET_TYPE_INVALID 0		    // 无效的套接字
-#define SOCKET_TYPE_LISTEN_NOTADD 2		// 监听套接字，未加入epoll管理
-#define SOCKET_TYPE_LISTEN_ADD   3		// 监听套接字，已加入epoll管理
-#define SOCKET_TYPE_CONNECT_ADD  5	    // 已连接套接，主动或被动(connect,accept成功，并已加入epoll管理)
-#define SOCKET_TYPE_HALFCLOSE  6	    // 应用层已发起关闭套接字请求，应用层发送缓冲区尚未发送完，未调用close
-#define SOCKET_TYPE_CONNECT_NOTADD 7		// accept返回的已连接套接字，但未加入epoll管理
-#define SOCKET_TYPE_OTHER          8		// 其它类型的文件描述符，比如stdin,stdout等
+#define SOCKET_TYPE_INVALID 0		   
+#define SOCKET_TYPE_LISTEN_NOTADD 2		
+#define SOCKET_TYPE_LISTEN_ADD   3		
+#define SOCKET_TYPE_CONNECT_ADD  5	    
+#define SOCKET_TYPE_HALFCLOSE  6	    
+#define SOCKET_TYPE_CONNECT_NOTADD 7	
+#define SOCKET_TYPE_OTHER          8		// 
 
 struct append_buffer
 {
