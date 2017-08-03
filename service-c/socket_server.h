@@ -22,5 +22,8 @@ int socket_server_listen(struct socket_server *ss,const char* host,int port,int 
 int socket_server_start(struct socket_server *ss,int id);
 void socket_server_release(struct socket_server *ss);
 
+void read_test(struct socket_server* ss,int id,const char* data,int size,struct socket_message *result);
+
+
 #endif
 

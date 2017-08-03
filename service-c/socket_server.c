@@ -472,15 +472,15 @@ int socket_server_start(struct socket_server *ss,int id)
 	}
 	if (s->type == SOCKET_TYPE_CONNECT_NOTADD || s->type == SOCKET_TYPE_LISTEN_NOTADD) 
 	{
-		printf("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
-		printf("socket_server_start s->type = %d\n",s->type);
+//		printf("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+//		printf("socket_server_start s->type = %d\n",s->type);
 		if(epoll_add(ss->epoll_fd,s->fd,s) == -1)
 		{
 			s->type = SOCKET_TYPE_INVALID;
 			return SOCKET_ERROR;
 		}
 		s->type = (s->type == SOCKET_TYPE_CONNECT_NOTADD) ? SOCKET_TYPE_CONNECT_ADD : SOCKET_TYPE_LISTEN_ADD;//change
-		printf("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+//		printf("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
 		return SOCKET_SUCCESS;//成功加入到 epoll 中管理。
 	}
 	return SOCKET_ERROR;
@@ -565,3 +565,13 @@ int socket_server_send(struct socket_server* ss,struct request_send * request,st
 	return 0;
 }
 
+
+void read_test(struct socket_server* ss,int id,const char* data,int size,struct socket_message *result)
+{
+	struct request_send * request = (struct request_send*)malloc(sizeof(struct request_send));
+	request -> id = id;
+	request->size = size;
+	request->buffer = (char*)data;
+
+	socket_server_send(ss,request,result);
+}

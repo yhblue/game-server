@@ -5,7 +5,6 @@
 
 int main()
 {
-	unsigned int times = 0;
 	struct socket_server* ss = socket_server_create();
 	if(ss == NULL)
 		return -1;
@@ -27,7 +26,8 @@ int main()
 				goto _EXIT;
 			case SOCKET_DATA:
 				printf("data[id=%d],size=%d,%s\n",result.id,result.lid_size,result.data);
-				free(result.data);
+				//free(result.data);
+				read_test(ss,result.id,result.data,result.lid_size,&result);
 				break;
 			case SOCKET_ACCEPT://client connect
 				printf("accept[id=%d] from [id=%d]",result.id,result.lid_size);
@@ -40,8 +40,6 @@ int main()
 				printf("success[id=%d] add to epoll\n",result.id);
 				break;
 			default:
-				if(times % 1000 == 0)
-					printf("nothing!\n");
 				break;
 		}
 	}
