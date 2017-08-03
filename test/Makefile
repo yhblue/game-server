@@ -1,8 +1,8 @@
 .SUFFIXES:.c .o
 CC=gcc
-SRCS=fifo.c
+SRCS=fifo_write.c
 OBJS=$(SRCS:.c=.o)
-TARGET=fifo
+TARGET=fifo_write
 
 $(TARGET):$(OBJS)
 	$(CC) -g -Wall -o $@ $(OBJS)
