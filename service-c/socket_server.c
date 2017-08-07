@@ -398,6 +398,85 @@ static int pipe_init(struct socket_server* ss,int pipe_type)
 
 	return pipe_fd[0];
 }
+static int read_from_pipe(struct socket_server *ss,void* buffer,int len)
+{
+	for( ; ; )
+	{
+		int n = read(ss->pipe_read_fd,buffer,len);
+		if(n < 0)
+		{
+			if(errno == EINTR)
+				continue;
+			else
+				fprintf(ERR_FILE, "read_from_pipe: read pipe error %s.",strerror(errno));
+				return -1;				
+		}
+		if(n == len)
+			return 0;
+	}
+	fprintf(ERR_FILE, "read_from_pipe: read pipe error,need to read size=%d but result size=%d\n",len,n);
+	return -1;
+}
+
+static int close_socket(struct socket_server *ss,struct close_req *close,struct socket_message * result)
+{
+	int close_id = close->id;
+	struct socket *s = &ss->socket_pool[close_id % MAX_SOCKET];
+	if(s == NULL || s->type != SOCKET_TYPE_CONNECT_ADD)
+	{
+		fprintf(ERR_FILE,"close_socket: close a error socket\n");	
+		return -1
+	}
+	if(s->remain_size)
+	{
+		int type = send_data(ss,s,result);
+		if(type != -1)
+			return type;
+	}
+	if(s->remain_size == 0)
+	{
+		close_fd(ss,s,result);
+		return SOCKET_CLOSE;
+	}
+
+}
+
+static int dispose_pipe_event(struct socket_server *ss,struct socket_message *result)
+{
+	uint8_t pipe_head[PIPE_HEAD_BUFF];  //msg 
+	if(read_from_pipe(ss,pipe_head,PIPE_HEAD_BUFF) = -1)
+	{
+		return -1;
+	}
+	uint8_t type = head[0];
+	uint8_t len = head[1];
+
+	if(type == 'D')
+	{
+		struct send_data_req send; //content
+
+		if(len > MAXPIPE_CONTENT_BUFF)
+			fprintf(ERR_FILE,"dispose_pipe_event:data too large\n");	
+			return -1;
+		send.buffer = (char*)malloc(len);  //发送出去的内存，需要在send函数中释放掉申请的内存
+		if(read_from_pipe(ss,&send,len) == -1)
+		{
+			return -1;
+		}		
+		socket_server_send(ss,&send,result);
+		return 0;
+	}
+	if(type == 'C')
+	{
+		struct close_req close;
+		if(read_from_pipe(ss,&close,len) == -1)
+		{
+			return -1;
+		}
+		close_socket(ss,&close,result);
+	}
+}
+
 //----------------------------------------------------------------------------------------------------------------------
 struct socket_server* socket_server_create()
 {
@@ -467,101 +546,25 @@ int socket_server_listen(struct socket_server *ss,const char* host,int port,int 
 	return -1;
 }
 
-static int read_from_pipe(struct socket_server *ss,void* buffer,int len)
-{
-	for( ; ; )
-	{
-		int n = read(ss->pipe_read_fd,buffer,len);
-		if(n < 0)
-		{
-			if(errno == EINTR)
-				continue;
-			else
-				fprintf(ERR_FILE, "read_from_pipe: read pipe error %s.",strerror(errno));
-				return -1;				
-		}
-		if(n == len)
-			return 0;
-	}
-	fprintf(ERR_FILE, "read_from_pipe: read pipe error,need to read size=%d but result size=%d\n",len,n);
-	return -1;
-}
 
-static int close_socket(struct socket_server *ss,struct close_req close,struct socket_message * result)
-{
-	int close_id = close.id;
-	struct socket *s = &ss->socket_pool[close_id % MAX_SOCKET];
-	if(s == NULL || s->type != SOCKET_TYPE_CONNECT_ADD)
-	{
-		fprintf(ERR_FILE,"close_socket: close a error socket\n");	
-		return -1
-	}
-	if(remain_size)
-	{
-		int type = send_data(ss,s,result);
-		if(type != -1)
-			return type;
-	}
-	if(remain_size == 0)
-	{
-		close_fd(ss,s,result);
-		return SOCKET_CLOSE;
-	}
-
-}
-
-static int dispose_pipe_event(struct socket_server *ss)
-{
-	uint8_t pipe_head[PIPE_HEAD_BUFF];  //msg 
-	if(read_from_pipe(ss,pipe_head,PIPE_HEAD_BUFF) = -1)
-	{
-		return -1;
-	}
-	uint8_t type = head[0];
-	uint8_t len = head[1];
-
-	if(type == 'D')
-	{
-		struct send_data_req send; //content
-
-		if(len > MAXPIPE_CONTENT_BUFF)
-			fprintf(ERR_FILE,"dispose_pipe_event:data to large\n");	
-			return -1;
-		send.buffer = (char*)malloc(len);
-		if(read_from_pipe(ss,send,len) == -1)
-		{
-			return -1;
-		}		
-		socket_server_send();
-		return 0;
-	}
-	if(type == 'C')
-	{
-		struct close_req close;
-		if(read_from_pipe(ss,send,len) == -1)
-		{
-			return -1;
-		}
-		close_fd();			 
-	}
-}
 
 int socket_server_event(struct socket_server *ss, struct socket_message * result)
 {
 	for( ; ; )
 	{	
-		if(pipe_read)
+		if(ss->pipe_read)
 		{
 			if(dispose_pipe_event(ss) == -1)
 			{
 				fprintf(ERR_FILE,"socket_server_event:dispose pipe event failed\n");
 				return -1;
 			}
+			ss->pipe_read = false;
 		}
 		if(ss->event_index == ss->event_n)  
 		{
 			ss->event_n = sepoll_wait(ss->epoll_fd,ss->event_pool,MAX_EVENT);
-			if(ss->event_n <= 0) //err
+			if(ss->event_n <= 0) //error
 			{
 				fprintf(ERR_FILE,"socket_server_event:sepoll_wait return error event_n\n");
 				ss->event_n = 0;
@@ -573,7 +576,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		struct socket *s = eve->s_p; 
 		if(s->NULL)
 		{
-			fprintf(ERR_FILE,"socket_server_event:a NULL s\n");
+			fprintf(ERR_FILE,"socket_server_event:a NULL socket\n");
 			return -1;		
 		}
 		switch(s->type) 
@@ -662,7 +665,7 @@ void socket_server_release(struct socket_server *ss)
 
 
 //管道中接收到其他进程发过了的写socket操作调用。
-int socket_server_send(struct socket_server* ss,struct request_send * request,struct socket_message *result)
+int socket_server_send(struct socket_server* ss,struct send_data_req * request,struct socket_message *result)
 {
 	int id = request->id;
 	struct socket * s = &ss->socket_pool[id % MAX_SOCKET];
@@ -708,7 +711,7 @@ int socket_server_send(struct socket_server* ss,struct request_send * request,st
 		}
 		if(n < request->size)
 		{
-			append_remaindata(s,request,n);  //
+			append_remaindata(s,request,n);  
 			epoll_write(ss->epoll_fd,s->fd,s,true);
 		}		
 	}
@@ -726,7 +729,6 @@ void read_test(struct socket_server* ss,int id,const char* data,int size,struct 
 	request -> id = id;
 	request->size = size;
 	request->buffer = (char*)data;
-
 	socket_server_send(ss,request,result);
 }
 
