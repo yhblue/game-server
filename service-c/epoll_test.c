@@ -14,7 +14,6 @@ int main()
 	if(listen_id == -1)
 		return -1;
 	socket_server_start(ss,listen_id);
-
 	struct socket_message result;
 
 	for ( ; ; )
