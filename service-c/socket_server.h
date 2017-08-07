@@ -13,7 +13,8 @@
 struct socket_message {
 	int id;
 	int lid_size;	           // for accept,ud is id，for data,size of data
-	char * data;
+	char* data;    //指向返回的数据
+//	char* buffer;  //存储返回的数据，128字节，整个系统结束才释放
 };
 
 struct socket_server* socket_server_create();
@@ -21,7 +22,6 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 int socket_server_listen(struct socket_server *ss,const char* host,int port,int backlog);
 int socket_server_start(struct socket_server *ss,int id);
 void socket_server_release(struct socket_server *ss);
-
 void read_test(struct socket_server* ss,int id,const char* data,int size,struct socket_message *result);
 
 

@@ -1,6 +1,6 @@
 /*
 网络 IO 的核心部分代码
- */
+*/
 #include "socket_server.h"
 #include "socket_epoll.h"
 #include "err.h"
@@ -38,17 +38,17 @@
 struct append_buffer
 {
 	struct append_buffer* next;
-	void* buffer;//in order to free memery
+	void* buffer;     //in order to free memery
 	void* current;
-	int size;   //这块缓冲区中剩余未发送的字节数
+	int size;        //这块缓冲区中剩余未发送的字节数
 };
 
 struct socket
 {
-	int fd;       //socket fd  
-	int id;       //id
-	int type;     //socket type
-	int remain_size; //缓冲区链表剩余的字节数
+	int fd;          	//socket fd  
+	int id;          	//id
+	int type;     	 	//socket type
+	int remain_size; 	//缓冲区链表剩余的字节数
 	struct append_buffer* head;
 	struct append_buffer* tail;
 };
@@ -134,7 +134,6 @@ static int append_remaindata(struct socket *s,struct send_data_req * request,int
 	return 0;
 }
 
-
 //id from 1-2^31-1
 static int apply_id()
 {
@@ -166,9 +165,11 @@ static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool a
 			return NULL;
 		}
 	}
-
 	s->fd = fd;
 	s->id = id;
+	s->remain_size = 0;
+	s->head = NULL;
+	S->tail = NULL;
 	return s;
 }
 
@@ -221,7 +222,8 @@ _err:
 //为 listen_fd 申请 socket_pool 中一个成员
 static int listen_socket(struct socket_server *ss,int listen_fd,int id)
 {
-	struct socket *s = apply_socket(ss,listen_fd,id,false);
+	struct socket *s = 
+	(ss,listen_fd,id,false);
 	if(s == NULL)
 	{
 		fprintf(ERR_FILE,"listen_id apply socket failed\n"); 
@@ -263,8 +265,8 @@ static int dispose_accept(struct socket_server *ss,struct socket *s,struct socke
 	}
 	cs->type = SOCKET_TYPE_CONNECT_NOTADD;
 	result->id = id;
-	result->lid_size = s->id;//listen_id
-	result->data = "accept new client";
+	result->lid_size = s->id; //listen_id
+	result->data = "accept new client\n";
 	return 0;   
 }
 
@@ -275,7 +277,7 @@ static void close_fd(struct socket_server *ss,struct socket *s,struct socket_mes
 	{
 		return;
 	}
-	if(s->type!=SOCKET_TYPE_LISTEN_NOTADD || s->type!=SOCKET_TYPE_CONNECT_NOTADD)
+	if(s->type == SOCKET_TYPE_LISTEN_ADD || s->type == SOCKET_TYPE_CONNECT_ADD) //
 	{
 		if(epoll_del(ss->epoll_fd,s->fd) == -1)
 		{
@@ -283,11 +285,22 @@ static void close_fd(struct socket_server *ss,struct socket *s,struct socket_mes
 		}
 	}
 	result->id = s->id;
-	result->data = "close";
+	result->data = "close\n";
 
 	s->id = 0;
+	struct append_buffer* tmp = s->head;
+	while( tmp ) //free
+	{
+		s->head = s->head->next;
+		free(tmp->buffer);
+		free(tmp);
+		tmp = s->head;
+	}
 	close(s->fd);
 	s->type = SOCKET_TYPE_INVALID;
+	s->head = NULL;
+	s->tail = NULL;
+	s->remain_size = 0;
 }
 
 //处理epoll的可读事件
@@ -295,6 +308,11 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 {
 	int size = SOCKET_READBUFF;
 	char* buffer = (char*)malloc(size);
+	if(buffer == NULL) 
+	{
+		fprintf(ERR_FILE,"dispose_readmessage: result->buffer is NULL\n");
+		return -1;
+	}
 	memset(buffer,0,size);
 	int n = (int)read(s->fd,buffer,size);
 	if(n < 0)
@@ -303,16 +321,15 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 		switch(errno)
 		{
 			case EINTR:
-				fprintf(ERR_FILE,"socket read,EINTR\n");
-				break;    // wait for next time
-			case EAGAIN:
-				fprintf(ERR_FILE,"socket read, EAGAIN\n");
+				fprintf(ERR_FILE,"dispose_readmessage: socket read,EINTR\n");
+				break;    	// wait for next time
+			case EAGAIN:	
+				fprintf(ERR_FILE,"dispose_readmessage: socket read,EAGAIN\n");
 				break;
 			default:
 				close_fd(ss,s,result);
 				return SOCKET_ERROR;			
 		}
-		return -1;
 	}
 	if(n == 0) //client close,important
 	{
@@ -323,14 +340,14 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 
 	result->id = s->id;
 	result->lid_size = n;
-	result->data = buffer;
-	return SOCKET_DATA;
+	result->data = buffer;  //send to pipe,do not neet to free
+	return SOCKET_DATA;		
 }
 
 static int send_data(struct socket_server* ss,struct socket *s,struct socket_message *result)
 {
 	while(s->head)
-	{
+	{ 
 		struct append_buffer * tmp = s->head;
 		for( ; ; )
 		{
@@ -355,16 +372,17 @@ static int send_data(struct socket_server* ss,struct socket *s,struct socket_mes
 				tmp->current += n;
 				tmp->size -= n; 
 			}
-			if(n == tmp->size)
+			if(n == tmp->size)  //这一块数据已经发送完成
 			{
-				s->head = tmp->next;
+				s->head = tmp->next;    
 				if(tmp->buffer != NULL)
 				{
 					free(tmp->buffer);
-					free(tmp); //last s->head node 
-				}
+					free(tmp); 
+				}				
+				break;
 			}
-		}
+		}	
 	}	
 	s->tail = NULL;
 	epoll_write(ss->epoll_fd,s->fd,s,false);  //写完了，取消关注写事件
@@ -456,7 +474,7 @@ static int socket_server_send(struct socket_server* ss,struct send_data_req * re
 		}
 		return -1;
 	}
-	if(s->head == NULL)
+	if(s->head == NULL) //追加的缓冲区中不存在未发送的数据
 	{
 		int n = write(s->fd,request->buffer,request->size);
 		if(n == -1)
@@ -468,9 +486,9 @@ static int socket_server_send(struct socket_server* ss,struct send_data_req * re
 					n = 0;
 					break;
 				default:
-					fprintf(stderr, "socket_server_send: write to %d (fd=%d) error.",id,s->fd);
+					fprintf(stderr, "socket_server_send: write to %d (fd=%d) error.",id,s->fd);			
 					close_fd(ss,s,result);
-					if(request->buffer != NULL)
+					if(request->buffer != NULL)  //error,free memory
 					{
 						free(request->buffer);
 						request->buffer = NULL;
@@ -478,7 +496,7 @@ static int socket_server_send(struct socket_server* ss,struct send_data_req * re
 					return -1;
 			}
 		}
-		if(n == request->size)
+		if(n == request->size) //send success
 		{
 			if(request->buffer != NULL)
 			{
@@ -556,6 +574,8 @@ struct socket_server* socket_server_create()
 
 	ss->epoll_fd = efd;
 	ss->event_n = 0;
+	ss->event_index = 0;
+	ss->pipe_read = false;
 	ss->socket_pool = (struct socket*)malloc(sizeof(struct socket)*MAX_SOCKET);
 	if(ss->socket_pool == NULL)
 	{
@@ -572,8 +592,6 @@ struct socket_server* socket_server_create()
 		free(ss->socket_pool);
 		return NULL;
 	}
-	ss->event_index = 0;
-	ss->pipe_read = false;
 
 	int i = 0;
 	struct socket *s = NULL;
@@ -605,8 +623,6 @@ int socket_server_listen(struct socket_server *ss,const char* host,int port,int 
 	}
 	return -1;
 }
-
-
 
 int socket_server_event(struct socket_server *ss, struct socket_message * result)
 {
@@ -670,7 +686,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 				}
 				if(eve->error)
 				{
-					;
+					
 				}
 				break;
 		}
@@ -722,9 +738,6 @@ void socket_server_release(struct socket_server *ss)
 	free(ss->event_pool);
 	free(ss);
 }
-
-
-
 
 
 void read_test(struct socket_server* ss,int id,const char* data,int size,struct socket_message *result)
