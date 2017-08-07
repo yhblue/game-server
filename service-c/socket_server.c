@@ -31,7 +31,7 @@
 #define SOCKET_TYPE_CONNECT_ADD      5	    
 #define SOCKET_TYPE_HALFCLOSE        6	    
 #define SOCKET_TYPE_CONNECT_NOTADD   7	
-#define SOCKET_TYPE_OTHER            8		// 
+#define SOCKET_TYPE_OTHER            8		
 #define SOCKET_TYPE_PIPE_READ        9
 #define SOCKET_TYPE_PIPE_WRITE      10
 
@@ -499,6 +499,7 @@ static int socket_server_send(struct socket_server* ss,struct send_data_req * re
 		{
 			if(request->buffer != NULL)
 			{
+				printf("request->buffer was free\n");
 				free(request->buffer);
 				request->buffer = NULL;
 			}		
@@ -741,11 +742,11 @@ void socket_server_release(struct socket_server *ss)
 
 void read_test(struct socket_server* ss,int id,const char* data,int size,struct socket_message *result)
 {
-	// struct request_send * request = (struct request_send*)malloc(sizeof(struct request_send));
-	// request -> id = id;
-	// request->size = size;
-	// request->buffer = (char*)data;
-	// socket_server_send(ss,request,result);
+	struct send_data_req * request = (struct send_data_req*)malloc(sizeof(struct send_data_req));
+	request -> id = id;
+	request->size = size;
+	request->buffer = (char*)data;
+	socket_server_send(ss,request,result);
 }
 
 
