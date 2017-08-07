@@ -16,7 +16,7 @@ int main()
 	socket_server_start(ss,listen_id);
 
 	struct socket_message result;
-	result->buffer = (char*)malloc(SOCKET_READBUFF);
+
 	for ( ; ; )
 	{
 		int type = socket_server_event(ss,&result);

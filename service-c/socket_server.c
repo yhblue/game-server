@@ -169,7 +169,7 @@ static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool a
 	s->id = id;
 	s->remain_size = 0;
 	s->head = NULL;
-	S->tail = NULL;
+	s->tail = NULL;
 	return s;
 }
 
@@ -222,8 +222,7 @@ _err:
 //为 listen_fd 申请 socket_pool 中一个成员
 static int listen_socket(struct socket_server *ss,int listen_fd,int id)
 {
-	struct socket *s = 
-	(ss,listen_fd,id,false);
+	struct socket *s = apply_socket(ss,listen_fd,id,false);
 	if(s == NULL)
 	{
 		fprintf(ERR_FILE,"listen_id apply socket failed\n"); 
