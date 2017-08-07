@@ -112,7 +112,7 @@ struct pipe_recv_packet
 };
 
 //-------------------------------------------------------------------------------------------------------------------------
-static int append_remaindata(struct socket *s,struct request_send * request,int start)
+static int append_remaindata(struct socket *s,struct send_data_req * request,int start)
 {
 	struct append_buffer* node = (struct append_buffer*)malloc(sizeof(struct append_buffer));
 	if(node == NULL)
@@ -400,9 +400,10 @@ static int pipe_init(struct socket_server* ss,int pipe_type)
 }
 static int read_from_pipe(struct socket_server *ss,void* buffer,int len)
 {
+	int n = 0;
 	for( ; ; )
 	{
-		int n = read(ss->pipe_read_fd,buffer,len);
+		n = read(ss->pipe_read_fd,buffer,len);
 		if(n < 0)
 		{
 			if(errno == EINTR)
@@ -425,7 +426,7 @@ static int close_socket(struct socket_server *ss,struct close_req *close,struct 
 	if(s == NULL || s->type != SOCKET_TYPE_CONNECT_ADD)
 	{
 		fprintf(ERR_FILE,"close_socket: close a error socket\n");	
-		return -1
+		return -1;
 	}
 	if(s->remain_size)
 	{
@@ -438,18 +439,76 @@ static int close_socket(struct socket_server *ss,struct close_req *close,struct 
 		close_fd(ss,s,result);
 		return SOCKET_CLOSE;
 	}
+	return -1;
+}
 
+//管道中接收到其他进程发过了的写socket操作调用。
+static int socket_server_send(struct socket_server* ss,struct send_data_req * request,struct socket_message *result)
+{
+	int id = request->id;
+	struct socket * s = &ss->socket_pool[id % MAX_SOCKET];
+	if(s->type != SOCKET_TYPE_CONNECT_ADD) //加入管道通信功能后这里可能要修改
+	{
+		if(request->buffer != NULL)
+		{
+			free(request->buffer);
+			request->buffer = NULL;			
+		}
+		return -1;
+	}
+	if(s->head == NULL)
+	{
+		int n = write(s->fd,request->buffer,request->size);
+		if(n == -1)
+		{
+			switch(errno)
+			{
+				case EINTR:
+				case EAGAIN:
+					n = 0;
+					break;
+				default:
+					fprintf(stderr, "socket_server_send: write to %d (fd=%d) error.",id,s->fd);
+					close_fd(ss,s,result);
+					if(request->buffer != NULL)
+					{
+						free(request->buffer);
+						request->buffer = NULL;
+					}
+					return -1;
+			}
+		}
+		if(n == request->size)
+		{
+			if(request->buffer != NULL)
+			{
+				free(request->buffer);
+				request->buffer = NULL;
+			}		
+			return 0;
+		}
+		if(n < request->size)
+		{
+			append_remaindata(s,request,n);  
+			epoll_write(ss->epoll_fd,s->fd,s,true);
+		}		
+	}
+	else
+	{
+		append_remaindata(s,request,0);
+	}
+	return 0;
 }
 
 static int dispose_pipe_event(struct socket_server *ss,struct socket_message *result)
 {
 	uint8_t pipe_head[PIPE_HEAD_BUFF];  //msg 
-	if(read_from_pipe(ss,pipe_head,PIPE_HEAD_BUFF) = -1)
+	if(read_from_pipe(ss,pipe_head,PIPE_HEAD_BUFF) == -1)
 	{
 		return -1;
 	}
-	uint8_t type = head[0];
-	uint8_t len = head[1];
+	uint8_t type = pipe_head[0];
+	uint8_t len = pipe_head[1];
 
 	if(type == 'D')
 	{
@@ -475,6 +534,7 @@ static int dispose_pipe_event(struct socket_server *ss,struct socket_message *re
 		}
 		close_socket(ss,&close,result);
 	}
+	return 0;
 }
 
 //----------------------------------------------------------------------------------------------------------------------
@@ -486,14 +546,14 @@ struct socket_server* socket_server_create()
 		fprintf(ERR_FILE,"socket_server_create:epoll create failed\n");
 		return NULL;
 	}
-	int pipe_read = pipe_init();
+	struct socket_server *ss = malloc(sizeof(*ss));
+	int pipe_read = pipe_init(ss,SOCKET_TYPE_PIPE_READ); //read type pipe
 	if( pipe_read == -1)
 	{
 		fprintf(ERR_FILE,"socket_server_create:pipe init failed\n");
 		epoll_release(efd);
 	}
 
-	struct socket_server *ss = malloc(sizeof(*ss));
 	ss->epoll_fd = efd;
 	ss->event_n = 0;
 	ss->socket_pool = (struct socket*)malloc(sizeof(struct socket)*MAX_SOCKET);
@@ -554,7 +614,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 	{	
 		if(ss->pipe_read)
 		{
-			if(dispose_pipe_event(ss) == -1)
+			if(dispose_pipe_event(ss,result) == -1)
 			{
 				fprintf(ERR_FILE,"socket_server_event:dispose pipe event failed\n");
 				return -1;
@@ -574,7 +634,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		}
 		struct event* eve = &ss->event_pool[ss->event_index++];
 		struct socket *s = eve->s_p; 
-		if(s->NULL)
+		if(s == NULL)
 		{
 			fprintf(ERR_FILE,"socket_server_event:a NULL socket\n");
 			return -1;		
@@ -664,72 +724,16 @@ void socket_server_release(struct socket_server *ss)
 }
 
 
-//管道中接收到其他进程发过了的写socket操作调用。
-int socket_server_send(struct socket_server* ss,struct send_data_req * request,struct socket_message *result)
-{
-	int id = request->id;
-	struct socket * s = &ss->socket_pool[id % MAX_SOCKET];
-	if(s->type != SOCKET_TYPE_CONNECT_ADD) //加入管道通信功能后这里可能要修改
-	{
-		if(request->buffer != NULL)
-		{
-			free(request->buffer);
-			request->buffer = NULL;			
-		}
-		return -1;
-	}
-	if(s->head == NULL)
-	{
-		int n = write(s->fd,request->buffer,request->size);
-		if(n == -1)
-		{
-			switch(errno)
-			{
-				case EINTR:
-				case EAGAIN:
-					n = 0;
-					break;
-				default:
-					fprintf(stderr, "socket_server_send: write to %d (fd=%d) error.",id,s->fd);
-					close_fd(ss,s,result);
-					if(request->buffer != NULL)
-					{
-						free(request->buffer);
-						request->buffer = NULL;
-					}
-					return -1;
-			}
-		}
-		if(n == request->size)
-		{
-			if(request->buffer != NULL)
-			{
-				free(request->buffer);
-				request->buffer = NULL;
-			}		
-			return 0;
-		}
-		if(n < request->size)
-		{
-			append_remaindata(s,request,n);  
-			epoll_write(ss->epoll_fd,s->fd,s,true);
-		}		
-	}
-	else
-	{
-		append_remaindata(s,request,0);
-	}
-	return 0;
-}
+
 
 
 void read_test(struct socket_server* ss,int id,const char* data,int size,struct socket_message *result)
 {
-	struct request_send * request = (struct request_send*)malloc(sizeof(struct request_send));
-	request -> id = id;
-	request->size = size;
-	request->buffer = (char*)data;
-	socket_server_send(ss,request,result);
+	// struct request_send * request = (struct request_send*)malloc(sizeof(struct request_send));
+	// request -> id = id;
+	// request->size = size;
+	// request->buffer = (char*)data;
+	// socket_server_send(ss,request,result);
 }
 
 
