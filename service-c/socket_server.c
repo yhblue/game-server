@@ -154,7 +154,7 @@ static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool a
 	{
 	 	return NULL;
 	}
-
+	printf("s->type = %d\n",s->type);
 	assert(s->type == SOCKET_TYPE_INVALID);
 
 	if(add_epoll)
@@ -207,16 +207,16 @@ static int do_listen(const char* host,int port,int max_connect)
         fprintf(ERR_FILE,"bind failed\n");  
         goto _err;      
     }
-	if (listen(listen_fd, max_connect) == -1) 
-	{
-		fprintf(ERR_FILE,"listen failed\n"); 
-		goto _err;
-	}    
+		if (listen(listen_fd, max_connect) == -1) 
+		{
+			fprintf(ERR_FILE,"listen failed\n"); 
+			goto _err;
+		}    
     return listen_fd;
 
 _err:
-	close(listen_fd);
-	return -1;  
+		close(listen_fd);
+		return -1;  
 }
 
 //为 listen_fd 申请 socket_pool 中一个成员
@@ -397,9 +397,12 @@ static int pipe_init(struct socket_server* ss,int pipe_type)
 	}
 	if(pipe_type == SOCKET_TYPE_PIPE_READ)
 	{
-		close(pipe_fd[1]); //close write
+//		close(pipe_fd[1]);
 		int id = apply_id();
+		printf("pipe init\n");
 		struct socket *s = apply_socket(ss,pipe_fd[0],id,true);
+		printf("pipe socket add to epoll\n");
+
 		if(s == NULL)
 		{
 			return -1;
@@ -409,10 +412,9 @@ static int pipe_init(struct socket_server* ss,int pipe_type)
 	}
 	else  
 	{
-		close(pipe_fd[0]); //close read	
+		close(pipe_fd[0]); 
 		ss->pipe_write_fd = pipe_fd[1];
 	}
-
 	return pipe_fd[0];
 }
 static int read_from_pipe(struct socket_server *ss,void* buffer,int len)
@@ -430,7 +432,10 @@ static int read_from_pipe(struct socket_server *ss,void* buffer,int len)
 				return -1;				
 		}
 		if(n == len)
+		{
 			return 0;
+		}
+
 	}
 	fprintf(ERR_FILE, "read_from_pipe: read pipe error,need to read size=%d but result size=%d\n",len,n);
 	return -1;
@@ -551,8 +556,9 @@ static int dispose_pipe_event(struct socket_server *ss,struct socket_message *re
 			return -1;
 		}
 		close_socket(ss,&close,result);
+		return 0;
 	}
-	return 0;
+	return -1;
 }
 
 //----------------------------------------------------------------------------------------------------------------------
@@ -565,13 +571,7 @@ struct socket_server* socket_server_create()
 		return NULL;
 	}
 	struct socket_server *ss = malloc(sizeof(*ss));
-	int pipe_read = pipe_init(ss,SOCKET_TYPE_PIPE_READ); //read type pipe
-	if( pipe_read == -1)
-	{
-		fprintf(ERR_FILE,"socket_server_create:pipe init failed\n");
-		epoll_release(efd);
-	}
-
+	printf("sizeof(*ss) = %ld,sizoeof(struct socket_server) = %ld\n",sizeof(*ss),sizeof(struct socket_server));
 	ss->epoll_fd = efd;
 	ss->event_n = 0;
 	ss->event_index = 0;
@@ -581,14 +581,12 @@ struct socket_server* socket_server_create()
 	{
 		fprintf(ERR_FILE,"socket_server_create:socket_pool malloc failed\n");
 		epoll_release(efd);
-		close(pipe_read);		
 	}
 	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
 	if(ss->event_pool == NULL)
 	{
 		fprintf(ERR_FILE,"socket_server_create:event_pool malloc failed\n");
 		epoll_release(efd);
-		close(pipe_read);
 		free(ss->socket_pool);
 		return NULL;
 	}
@@ -604,6 +602,15 @@ struct socket_server* socket_server_create()
 		s->remain_size = 0;
 		s->head = NULL;
 		s->tail = NULL;
+	}
+	int pipe_read = pipe_init(ss,SOCKET_TYPE_PIPE_READ); //read type pipe
+	if( pipe_read == -1)
+	{
+		fprintf(ERR_FILE,"socket_server_create:pipe init failed\n");
+		epoll_release(efd);
+		close(pipe_read);
+		free(ss->socket_pool);		
+		free(ss->event_pool);
 	}
 	return ss;
 }
@@ -630,16 +637,21 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 	{	
 		if(ss->pipe_read)
 		{
+			printf("dispose_pipe_event start\n");
 			if(dispose_pipe_event(ss,result) == -1)
 			{
 				fprintf(ERR_FILE,"socket_server_event:dispose pipe event failed\n");
 				return -1;
 			}
 			ss->pipe_read = false;
+			printf("dispose_pipe_event end\n");
 		}
 		if(ss->event_index == ss->event_n)  
 		{
+			printf("epoll wait start\n");
 			ss->event_n = sepoll_wait(ss->epoll_fd,ss->event_pool,MAX_EVENT);
+			printf("epoll wait end\n");
+			printf("event = %d\n",ss->event_n);
 			if(ss->event_n <= 0) //error
 			{
 				fprintf(ERR_FILE,"socket_server_event:sepoll_wait return error event_n\n");
@@ -658,11 +670,19 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		switch(s->type) 
 		{
 			case SOCKET_TYPE_PIPE_READ:
-				ss->pipe_read = true;
+			if(eve->read)
+					printf("pipe read event\n");
+			if(eve->write)
+					printf("pipe write event\n");
+			if(eve->error)
+					printf("pipe error event\n");				
+			ss->pipe_read = true;
+			printf("pipe have event!\n");
 					break;
 			case SOCKET_TYPE_LISTEN_ADD: //client connect
 				if(dispose_accept(ss,s,result) == 0)
 				{
+					printf("accept\n");
 					return SOCKET_ACCEPT;			
 				}
 				break;

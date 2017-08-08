@@ -55,7 +55,8 @@ int sepoll_wait(int efd, struct event *e, int max)
 		e[i].write = (flag & EPOLLOUT)? 1 : 0;
 		e[i].read = (flag & EPOLLIN)? 1 : 0;
 		e[i].error = (flag & EPOLLERR)? 1 : 0;
-    }
+//		printf("pipe return events is flag = %d\n",flag);
+   }
     return ret_n;
 }
 
