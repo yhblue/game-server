@@ -1,5 +1,5 @@
-#ifndef poll_socket_epoll_h
-#define poll_socket_epoll_h
+#ifndef SOCKET_EPOLL_H 
+#define SOCKET_EPOLL_H
 
 #include <sys/epoll.h>
 #include <stdbool.h>

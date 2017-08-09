@@ -10,6 +10,8 @@
 #define SOCKET_EXIT 5			// 退出事件
 #define SOCKET_IGNORE 6         // 忽略,无需处理
 
+
+
 struct socket_message {
 	int id;
 	int lid_size;	           // for accept,ud is id，for data,size of data

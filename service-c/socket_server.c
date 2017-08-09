@@ -20,7 +20,7 @@
 
 
 #define MAX_EVENT 64                //epoll_wait一次最多返回64个事件
-#define MAX_SOCKET 64*1024          //最多支持64k个socket连接
+#define MAX_SOCKET 32*1024          //最多支持32k个socket连接
 #define SOCKET_READBUFF 128
 #define PIPE_HEAD_BUFF    128   
 #define MAXPIPE_CONTENT_BUFF    128     
@@ -88,28 +88,8 @@ struct request_package
 	}msg;
 };
 
-struct close_req
-{
-	int id;
-};
 
-struct send_data_req
-{
-	int id;               //4
-	int size;            //4
-	char *buffer;	    //120
-};
 
-//可能用不到了
-struct pipe_recv_packet
-{
-	uint8_t head[4];   //
-	union
-	{
-		struct close_req close;
-		struct send_data_req send;
-	}content;
-};
 
 //-------------------------------------------------------------------------------------------------------------------------
 static int append_remaindata(struct socket *s,struct send_data_req * request,int start)
@@ -409,6 +389,7 @@ static int pipe_init(struct socket_server* ss,int pipe_type)
 		}
 		s->type = SOCKET_TYPE_PIPE_READ;		
 		ss->pipe_read_fd = pipe_fd[0];
+		ss->pipe_write_fd = pipe_fd[1];
 	}
 	else  
 	{
@@ -469,7 +450,7 @@ static int socket_server_send(struct socket_server* ss,struct send_data_req * re
 {
 	int id = request->id;
 	struct socket * s = &ss->socket_pool[id % MAX_SOCKET];
-	if(s->type != SOCKET_TYPE_CONNECT_ADD) //加入管道通信功能后这里可能要修改
+	if(s->type != SOCKET_TYPE_CONNECT_ADD) //如果已经关闭了那么在dispose_readmassage函数中会对状态进行改变
 	{
 		if(request->buffer != NULL)
 		{
