@@ -31,6 +31,7 @@ int main()
 				break;
 			case SOCKET_ACCEPT://client connect
 				printf("accept[id=%d] from [id=%d]",result.id,result.lid_size);
+				//登陆验证啊，假如不用的话，假如不用登陆验证，那要先加入epoll管理，不然那么多连接上来怎么处理
 				socket_server_start(ss,result.id);  //add to epoll
 				break;		
 			case SOCKET_CLOSE:

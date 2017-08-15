@@ -15,6 +15,9 @@
 //这时候这个socket又返回数据了，那么我该用这个共享内存去存储读的数据吗？
 //那就再做一个判断了，如果这个共享内存有新的数据,置1，取走后，置0，epoll读取前先判断一下id对应的共享内存的标志位是不是0，
 //是就存，否则，跳过，等待下一次读取。
+//
+//既然一个逻辑进程只开辟一个线程去处理50个场景，那么能不能给每一个场景开辟一个共享内存？
+//
 
 #include "err.h"
 #include "socket_epoll.h"
@@ -89,7 +92,7 @@ int get_logic_process(struct router *rt)
 //router通知这个logic进程有数据要处理了，让他去读取数据
 int socket_id2logic_fd(int id)
 {
-
+	
 }
 
 

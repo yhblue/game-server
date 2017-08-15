@@ -61,7 +61,9 @@ struct player
 
 struct server_player
 {
-	struct player *player_pool;
+	int player_num;              //这个进程里面的游戏总人数
+	int 
+	struct player* player_pool;  //每一个逻辑进程维护50个 player 结构体
 
 };
 
@@ -87,5 +89,9 @@ struct logic2net_shm_all
 {
 	struct logic2net_shm shm_array[LOGIC_PROCESS_NUM]; //最终所有的logic进程创建的共享内存
 };
+
+
+
+
 
 #pragma pack()

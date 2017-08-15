@@ -1,10 +1,2 @@
 #include "logic.h"
-
-
-
-
-//往管道中写数据
-int pipe_test(int pipe_fd)
-{
-	char * buffer = NULL;
-}
+http://www.cnblogs.com/purpleraintear/p/6160733.html

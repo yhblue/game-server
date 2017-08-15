@@ -23,7 +23,7 @@
 #define MAX_SOCKET 32*1024          //最多支持32k个socket连接
 #define SOCKET_READBUFF 128
 #define PIPE_HEAD_BUFF    128   
-#define MAXPIPE_CONTENT_BUFF    128     
+#define MAXPIPE_CONTENT_BUFF    	128     
 
 #define SOCKET_TYPE_INVALID          0		   
 #define SOCKET_TYPE_LISTEN_NOTADD    2		
@@ -87,8 +87,6 @@ struct request_package
 		struct request_close close;	
 	}msg;
 };
-
-
 
 
 //-------------------------------------------------------------------------------------------------------------------------
@@ -187,16 +185,16 @@ static int do_listen(const char* host,int port,int max_connect)
         fprintf(ERR_FILE,"bind failed\n");  
         goto _err;      
     }
-		if (listen(listen_fd, max_connect) == -1) 
-		{
-			fprintf(ERR_FILE,"listen failed\n"); 
-			goto _err;
-		}    
+	if (listen(listen_fd, max_connect) == -1) 
+	{
+		fprintf(ERR_FILE,"listen failed\n"); 
+		goto _err;
+	}    
     return listen_fd;
 
 _err:
-		close(listen_fd);
-		return -1;  
+	close(listen_fd);
+	return -1;  
 }
 
 //为 listen_fd 申请 socket_pool 中一个成员
@@ -286,7 +284,7 @@ static void close_fd(struct socket_server *ss,struct socket *s,struct socket_mes
 static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct socket_message * result)
 {
 	int size = SOCKET_READBUFF;
-	char* buffer = (char*)malloc(size);
+	char* buffer = (char*)malloc(size);  //这里换成共享内存？
 	if(buffer == NULL) 
 	{
 		fprintf(ERR_FILE,"dispose_readmessage: result->buffer is NULL\n");
@@ -302,7 +300,7 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 			case EINTR:
 				fprintf(ERR_FILE,"dispose_readmessage: socket read,EINTR\n");
 				break;    	// wait for next time
-			case EAGAIN:	
+			case EAGAIN:		
 				fprintf(ERR_FILE,"dispose_readmessage: socket read,EAGAIN\n");
 				break;
 			default:
@@ -416,7 +414,6 @@ static int read_from_pipe(struct socket_server *ss,void* buffer,int len)
 		{
 			return 0;
 		}
-
 	}
 	fprintf(ERR_FILE, "read_from_pipe: read pipe error,need to read size=%d but result size=%d\n",len,n);
 	return -1;
@@ -503,6 +500,7 @@ static int socket_server_send(struct socket_server* ss,struct send_data_req * re
 	}
 	return 0;
 }
+
 
 static int dispose_pipe_event(struct socket_server *ss,struct socket_message *result)
 {
@@ -618,21 +616,21 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 	{	
 		if(ss->pipe_read)
 		{
-			printf("dispose_pipe_event start\n");
+			//printf("dispose_pipe_event start\n");
 			if(dispose_pipe_event(ss,result) == -1)
 			{
 				fprintf(ERR_FILE,"socket_server_event:dispose pipe event failed\n");
 				return -1;
 			}
 			ss->pipe_read = false;
-			printf("dispose_pipe_event end\n");
+			//printf("dispose_pipe_event end\n");
 		}
 		if(ss->event_index == ss->event_n)  
 		{
-			printf("epoll wait start\n");
+			//printf("epoll wait start\n");
 			ss->event_n = sepoll_wait(ss->epoll_fd,ss->event_pool,MAX_EVENT);
-			printf("epoll wait end\n");
-			printf("event = %d\n",ss->event_n);
+			//printf("epoll wait end\n");
+			//printf("event = %d\n",ss->event_n);
 			if(ss->event_n <= 0) //error
 			{
 				fprintf(ERR_FILE,"socket_server_event:sepoll_wait return error event_n\n");
@@ -652,13 +650,13 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		{
 			case SOCKET_TYPE_PIPE_READ:
 			if(eve->read)
-					printf("pipe read event\n");
+					//printf("pipe read event\n");
 			if(eve->write)
-					printf("pipe write event\n");
+					//printf("pipe write event\n");
 			if(eve->error)
-					printf("pipe error event\n");				
+					//printf("pipe error event\n");				
 			ss->pipe_read = true;
-			printf("pipe have event!\n");
+			//printf("pipe have event!\n");
 					break;
 			case SOCKET_TYPE_LISTEN_ADD: //client connect
 				if(dispose_accept(ss,s,result) == 0)
