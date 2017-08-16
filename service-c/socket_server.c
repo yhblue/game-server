@@ -18,22 +18,22 @@
 #include <assert.h>
 #include <string.h>
 
-
+#define DATA_LEN_SIZE   1 //1个字节存储长度信息
 #define MAX_EVENT 64                //epoll_wait一次最多返回64个事件
 #define MAX_SOCKET 32*1024          //最多支持32k个socket连接
 #define SOCKET_READBUFF 128
 #define PIPE_HEAD_BUFF    128   
 #define MAXPIPE_CONTENT_BUFF    	128     
 
-#define SOCKET_TYPE_INVALID          0		   
+#define SOCKET_TYPE_INVALID          1		   
 #define SOCKET_TYPE_LISTEN_NOTADD    2		
 #define SOCKET_TYPE_LISTEN_ADD       3		
-#define SOCKET_TYPE_CONNECT_ADD      5	    
-#define SOCKET_TYPE_HALFCLOSE        6	    
-#define SOCKET_TYPE_CONNECT_NOTADD   7	
-#define SOCKET_TYPE_OTHER            8		
-#define SOCKET_TYPE_PIPE_READ        9
-#define SOCKET_TYPE_PIPE_WRITE      10
+#define SOCKET_TYPE_CONNECT_ADD      4	    
+#define SOCKET_TYPE_HALFCLOSE        5	    
+#define SOCKET_TYPE_CONNECT_NOTADD   6	
+#define SOCKET_TYPE_OTHER            7		
+#define SOCKET_TYPE_PIPE_READ        8
+#define SOCKET_TYPE_PIPE_WRITE       9
 
 struct append_buffer
 {
@@ -280,18 +280,35 @@ static void close_fd(struct socket_server *ss,struct socket *s,struct socket_mes
 	s->remain_size = 0;
 }
 
+static int handle_readmessage(struct socket_server *ss,struct socket *s, struct socket_message * result)
+{
+
+}
+
 //处理epoll的可读事件
 static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct socket_message * result)
 {
-	int size = SOCKET_READBUFF;
-	char* buffer = (char*)malloc(size);  //这里换成共享内存？
+	unsigned char len = 0;
+	int n = (int)read(s->fd,&len,DATA_LEN_SIZE);
+	if(n <= 0)
+		goto _err;
+
+	char* buffer = (char*)malloc(len);  
 	if(buffer == NULL) 
 	{
 		fprintf(ERR_FILE,"dispose_readmessage: result->buffer is NULL\n");
 		return -1;
 	}
-	memset(buffer,0,size);
-	int n = (int)read(s->fd,buffer,size);
+	memset(buffer,0,len);
+	int n = (int)read(s->fd,buffer,len);
+	if(n <= 0)
+		goto _err;
+
+	result->id = s->id;
+	result->lid_size = n;
+	result->data = buffer;  
+	return SOCKET_DATA;	
+_err:	
 	if(n < 0)
 	{
 		free(buffer);
@@ -314,11 +331,6 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 		close_fd(ss,s,result);
 		return SOCKET_CLOSE;
 	}
-
-	result->id = s->id;
-	result->lid_size = n;
-	result->data = buffer;  //send to pipe,do not neet to free
-	return SOCKET_DATA;		
 }
 
 static int send_data(struct socket_server* ss,struct socket *s,struct socket_message *result)
@@ -396,6 +408,7 @@ static int pipe_init(struct socket_server* ss,int pipe_type)
 	}
 	return pipe_fd[0];
 }
+
 static int read_from_pipe(struct socket_server *ss,void* buffer,int len)
 {
 	int n = 0;
@@ -407,8 +420,11 @@ static int read_from_pipe(struct socket_server *ss,void* buffer,int len)
 			if(errno == EINTR)
 				continue;
 			else
+			{
 				fprintf(ERR_FILE, "read_from_pipe: read pipe error %s.",strerror(errno));
-				return -1;				
+				return -1;					
+			}
+			
 		}
 		if(n == len)
 		{
@@ -616,21 +632,17 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 	{	
 		if(ss->pipe_read)
 		{
-			//printf("dispose_pipe_event start\n");
 			if(dispose_pipe_event(ss,result) == -1)
 			{
 				fprintf(ERR_FILE,"socket_server_event:dispose pipe event failed\n");
 				return -1;
 			}
 			ss->pipe_read = false;
-			//printf("dispose_pipe_event end\n");
 		}
 		if(ss->event_index == ss->event_n)  
 		{
-			//printf("epoll wait start\n");
 			ss->event_n = sepoll_wait(ss->epoll_fd,ss->event_pool,MAX_EVENT);
-			//printf("epoll wait end\n");
-			//printf("event = %d\n",ss->event_n);
+
 			if(ss->event_n <= 0) //error
 			{
 				fprintf(ERR_FILE,"socket_server_event:sepoll_wait return error event_n\n");
@@ -649,15 +661,12 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		switch(s->type) 
 		{
 			case SOCKET_TYPE_PIPE_READ:
-			if(eve->read)
-					//printf("pipe read event\n");
-			if(eve->write)
-					//printf("pipe write event\n");
-			if(eve->error)
-					//printf("pipe error event\n");				
+			// if(eve->read)
+			// if(eve->write)
+			// if(eve->error)		
 			ss->pipe_read = true;
-			//printf("pipe have event!\n");
 					break;
+
 			case SOCKET_TYPE_LISTEN_ADD: //client connect
 				if(dispose_accept(ss,s,result) == 0)
 				{
@@ -665,9 +674,11 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 					return SOCKET_ACCEPT;			
 				}
 				break;
+
 			case SOCKET_TYPE_INVALID:
 				fprintf(ERR_FILE,"socket_server_event:a invalied socket from pool\n");
 				break;
+
 			case SOCKET_TYPE_CONNECT_ADD:
 				if(eve->read)
 				{
@@ -746,6 +757,115 @@ void read_test(struct socket_server* ss,int id,const char* data,int size,struct 
 	request->size = size;
 	request->buffer = (char*)data;
 	socket_server_send(ss,request,result);
+}
+
+
+
+//能不能实现一个消息队列来实现线程之间的通信？消息队列的成员是
+typedef struct node 
+{  
+    char type;
+    int len;
+    char* buffer;
+    struct node* next;  
+}q_node;  
+  
+typedef struct _queue
+{  
+    queue* head; //指向对头节点  
+    queue* tail; //指向队尾节点  
+    pthread_mutex_t mutex_lock;
+}queue;
+
+queue* queue_creat() 
+{  
+    queue* q = (queue*)malloc(sizeof(queue));  
+    if (q == NULL) 
+    {  
+       fprintf(ERR_FILE,"queue_creat:malloc err\n");
+       return NULL;  
+    }  
+    q->head = NULL;  
+    q->tail = NULL;  
+
+    pthread_mutex_init(&(q->mutex_lock),NULL); 
+    return q;  
+}  
+  
+void queue_push(queue* q,char type,void* buf,int len)
+{  
+    q_node* qnode = (q_node*)malloc(sizeof(q_node));  
+    if (q_node == NULL)
+    {  
+        fprintf(ERR_FILE,"queue_push:malloc err\n"); 
+        return;  
+    }  
+
+    qnode->type = type;
+    qnode->len = len;
+    qnode->buffer = buf;
+    qnode->next = NULL;  
+
+   	pthread_mutex_lock(&(q->mutex_lock)); 
+    if (q->head == NULL) 
+    {  
+        q->head = qnode;  
+    }  
+    if (q->tail == NULL) 
+    {  
+        q->tail = qnode;  
+    }  
+    else 
+    {  
+        q->tail->next = qnode;  
+        q->rear = qnode;  
+    }  
+    pthread_mutex_unlock(&(q->mutex_lock));
+}  
+  
+bool queue_is_empty(queue* q)
+{  
+	pthread_mutex_lock(&(q->mutex_lock));
+    return (q->head == NULL);  
+    pthread_mutex_unlock(&(q->mutex_lock));
+}  
+  
+void* queue_pop(queue* q)
+{
+	if(queue_is_empty(q) == true)
+		return NULL;
+
+	pthread_mutex_lock(&(q->mutex_lock));
+	q_node* qtmp = q->head;
+	if(q->head == q->tail)
+	{
+		q->tail = NULL;
+	}
+	q->head = q->head->next; 
+	pthread_mutex_unlock(&(q->mutex_lock));
+
+	return qtmp; //调用的一方需要释放掉qtmp和qtmp->buffer的内存
+}
+
+
+void queue_destory(queue* q)
+{
+	while(!queue_is_empty(q))
+	{
+	   q_node* qtmp = queue_pop(q);
+	   if(qtmp != NULL)
+	   {
+			if(qtmp->buffer != NULL)
+			{
+				free(qtmp->buffer);
+				qtmp->buffer = NULL;
+			}
+			free(qtmp);
+			qtmp = NULL;
+	   }
+	}
+	free(q);
+	q = NULL;
 }
 
 
