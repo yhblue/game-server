@@ -15,8 +15,7 @@
 struct socket_message {
 	int id;
 	int lid_size;	           // for accept,ud is id，for data,size of data
-	char* data;    //指向返回的数据
-//	char* buffer;  //存储返回的数据，128字节，整个系统结束才释放
+	char* data;    				//指向返回的数据
 };
 
 struct socket_server* socket_server_create();

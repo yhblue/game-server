@@ -3,6 +3,7 @@
 */
 #include "socket_server.h"
 #include "socket_epoll.h"
+#include "lock_queue.h"
 #include "err.h"
 
 #include <sys/socket.h>
@@ -63,6 +64,7 @@ struct socket_server
     int pipe_read_fd;
     int pipe_write_fd;
     bool pipe_read;
+    queue* que;  //和网关逻辑线程通信的消息队列
 };
 
 struct request_close 
@@ -132,7 +134,7 @@ static struct socket* apply_socket(struct socket_server *ss,int fd,int id,bool a
 	{
 	 	return NULL;
 	}
-	printf("s->type = %d\n",s->type);
+	//printf("s->type = %d\n",s->type);
 	assert(s->type == SOCKET_TYPE_INVALID);
 
 	if(add_epoll)
@@ -280,16 +282,15 @@ static void close_fd(struct socket_server *ss,struct socket *s,struct socket_mes
 	s->remain_size = 0;
 }
 
-static int handle_readmessage(struct socket_server *ss,struct socket *s, struct socket_message * result)
-{
-
-}
 
 //处理epoll的可读事件
+//这个函数还需要改，如果第二次读len长度数据时候被信号中断了改怎么办
+//s中再增加一个成员记录？如果是0则不处理，如果不为0则按这个长度读？
 static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct socket_message * result)
 {
 	unsigned char len = 0;
 	int n = (int)read(s->fd,&len,DATA_LEN_SIZE);
+	assert(n == DATA_LEN_SIZE);
 	if(n <= 0)
 		goto _err;
 
@@ -301,6 +302,7 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 	}
 	memset(buffer,0,len);
 	int n = (int)read(s->fd,buffer,len);
+	assert(n == len);
 	if(n <= 0)
 		goto _err;
 
@@ -308,6 +310,7 @@ static int dispose_readmessage(struct socket_server *ss,struct socket *s, struct
 	result->lid_size = n;
 	result->data = buffer;  
 	return SOCKET_DATA;	
+
 _err:	
 	if(n < 0)
 	{
@@ -576,6 +579,7 @@ struct socket_server* socket_server_create()
 	{
 		fprintf(ERR_FILE,"socket_server_create:socket_pool malloc failed\n");
 		epoll_release(efd);
+		return NULL;
 	}
 	ss->event_pool = (struct event*)malloc(sizeof(struct event)*MAX_EVENT);
 	if(ss->event_pool == NULL)
@@ -606,7 +610,19 @@ struct socket_server* socket_server_create()
 		close(pipe_read);
 		free(ss->socket_pool);		
 		free(ss->event_pool);
+		return NULL;
 	}
+	queue* que = queue_creat();
+	if(que == NULL)
+	{
+		fprintf(ERR_FILE,"socket_server_create:queue creat failed\n");
+		epoll_release(efd);
+		close(pipe_read);
+		free(ss->socket_pool);		
+		free(ss->event_pool);		
+		return NULL;
+	}
+	ss->que = que;
 	return ss;
 }
 
@@ -660,10 +676,7 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		}
 		switch(s->type) 
 		{
-			case SOCKET_TYPE_PIPE_READ:
-			// if(eve->read)
-			// if(eve->write)
-			// if(eve->error)		
+			case SOCKET_TYPE_PIPE_READ:	
 			ss->pipe_read = true;
 					break;
 
@@ -702,7 +715,6 @@ int socket_server_event(struct socket_server *ss, struct socket_message * result
 		}
 	}
 }
-
 
 int socket_server_start(struct socket_server *ss,int id)
 {
@@ -750,122 +762,55 @@ void socket_server_release(struct socket_server *ss)
 }
 
 
-void read_test(struct socket_server* ss,int id,const char* data,int size,struct socket_message *result)
+
+// typedef struct node 
+// {  
+//     char type;
+//     int uid;  	   //socket uid
+//     int len;	   //for data is length,for other is 0
+//     char* buffer;  //for data is data,for other is NULL
+//     struct node* next;  
+// }q_node;
+
+//网络io线程只负责读写和负责通知网关处理线程处理
+int dispose_event_result(struct socket_server* ss,struct socket_message *result,int type)
 {
-	struct send_data_req * request = (struct send_data_req*)malloc(sizeof(struct send_data_req));
-	request -> id = id;
-	request->size = size;
-	request->buffer = (char*)data;
-	socket_server_send(ss,request,result);
-}
-
-
-
-//能不能实现一个消息队列来实现线程之间的通信？消息队列的成员是
-typedef struct node 
-{  
-    char type;
-    int len;
-    char* buffer;
-    struct node* next;  
-}q_node;  
-  
-typedef struct _queue
-{  
-    queue* head; //指向对头节点  
-    queue* tail; //指向队尾节点  
-    pthread_mutex_t mutex_lock;
-}queue;
-
-queue* queue_creat() 
-{  
-    queue* q = (queue*)malloc(sizeof(queue));  
-    if (q == NULL) 
-    {  
-       fprintf(ERR_FILE,"queue_creat:malloc err\n");
-       return NULL;  
-    }  
-    q->head = NULL;  
-    q->tail = NULL;  
-
-    pthread_mutex_init(&(q->mutex_lock),NULL); 
-    return q;  
-}  
-  
-void queue_push(queue* q,char type,void* buf,int len)
-{  
-    q_node* qnode = (q_node*)malloc(sizeof(q_node));  
-    if (q_node == NULL)
-    {  
-        fprintf(ERR_FILE,"queue_push:malloc err\n"); 
-        return;  
-    }  
-
-    qnode->type = type;
-    qnode->len = len;
-    qnode->buffer = buf;
-    qnode->next = NULL;  
-
-   	pthread_mutex_lock(&(q->mutex_lock)); 
-    if (q->head == NULL) 
-    {  
-        q->head = qnode;  
-    }  
-    if (q->tail == NULL) 
-    {  
-        q->tail = qnode;  
-    }  
-    else 
-    {  
-        q->tail->next = qnode;  
-        q->rear = qnode;  
-    }  
-    pthread_mutex_unlock(&(q->mutex_lock));
-}  
-  
-bool queue_is_empty(queue* q)
-{  
-	pthread_mutex_lock(&(q->mutex_lock));
-    return (q->head == NULL);  
-    pthread_mutex_unlock(&(q->mutex_lock));
-}  
-  
-void* queue_pop(queue* q)
-{
-	if(queue_is_empty(q) == true)
-		return NULL;
-
-	pthread_mutex_lock(&(q->mutex_lock));
-	q_node* qtmp = q->head;
-	if(q->head == q->tail)
+	q_node* qnode = (q_node*)malloc(sizeof(q_node));
+	if(qnode == NULL) 
 	{
-		q->tail = NULL;
+		fprintf(ERR_FILE,"dispose_event_result:qnode malloc failed\n");
 	}
-	q->head = q->head->next; 
-	pthread_mutex_unlock(&(q->mutex_lock));
 
-	return qtmp; //调用的一方需要释放掉qtmp和qtmp->buffer的内存
-}
-
-
-void queue_destory(queue* q)
-{
-	while(!queue_is_empty(q))
+	int uid = result.id;
+	char* buf = result.data;
+	int len = result.lid_size;	
+	switch(type)
 	{
-	   q_node* qtmp = queue_pop(q);
-	   if(qtmp != NULL)
-	   {
-			if(qtmp->buffer != NULL)
-			{
-				free(qtmp->buffer);
-				qtmp->buffer = NULL;
-			}
-			free(qtmp);
-			qtmp = NULL;
-	   }
+		case SOCKET_DATA:
+			set_qnode(qnode,TYPE_DATA,uid,len,buf,NULL);
+			break;
+
+		case SOCKET_CLOSE:
+			set_qnode(qnode,TYPE_CLOSE,uid,0,NULL,NULL);	
+			break;
+
+		case SOCKET_SUCCESS:
+			set_qnode(qnode,TYPE_SUCCESS,uid,0,NULL,NULL);
+			break;
 	}
-	free(q);
-	q = NULL;
+	queue_push(ss->que,qnode);
 }
 
+
+
+//--------------------------------------------------------------------------------------------------------------
+
+// void read_test(struct socket_server* ss,int id,const char* data,int size,struct socket_message *result)
+// {
+// 	struct send_data_req * request = (struct send_data_req*)malloc(sizeof(struct send_data_req));
+// 	request -> id = id;
+// 	request->size = size;
+// 	request->buffer = (char*)data;
+// 	socket_server_send(ss,request,result);
+// }
 

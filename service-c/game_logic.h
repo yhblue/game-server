@@ -1,8 +1,8 @@
-#ifndef _LOGIC_H
-#define _LOGIC_H
+#ifndef _GAME_LOGIC_H
+#define _GAME_LOGIC_H
 
-#define MAX_PLAYER 30
-#define LOGIC_PROCESS_NUM 50
+#define MAX_PLAYER 		  	30
+#define LOGIC_PROCESS_NUM 	50
 
 struct close_req
 {
@@ -32,7 +32,7 @@ struct package_send_data
 	struct send_data_req data;
 };
 
-//
+
 #pragma pack(1)
 struct player_msg
 {

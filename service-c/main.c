@@ -25,35 +25,40 @@ void main()
 			{
 				case SOCKET_EXIT:
 					goto _EXIT;
-				case SOCKET_DATA:
-					printf("data[id=%d],size=%d,%s\n",result.id,result.lid_size,result.data);
-					//free(result.data);
-					read_test(ss,result.id,result.data,result.lid_size,&result);
-					break;
+					
 				case SOCKET_ACCEPT://client connect
 					printf("accept[id=%d] from [id=%d]",result.id,result.lid_size);
 					socket_server_start(ss,result.id);  //add to epoll
-					break;		
+
+				case SOCKET_DATA:
 				case SOCKET_CLOSE:
-					printf("closed[id=%d]\n",result.id);
+				case SOCKET_SUCCESS:
 					break;
-				case SOCKET_SUCCESS:	
-					printf("success[id=%d] add to epoll\n",result.id);
-					break;
+
 				default:
-					break;
+					break;	
 			}
 		}
 	_EXIT:
 		socket_server_release(ss);			
 	}
-	if(pid == 0) //逻辑进程
-	{
-		int l2n_pipefd = pipe_read_fd;
-
-	}
-
 }
 
 
-
+				// case SOCKET_DATA:
+				// 	printf("data[id=%d],size=%d,%s\n",result.id,result.lid_size,result.data);
+				// 	//free(result.data);
+				// 	//read_test(ss,result.id,result.data,result.lid_size,&result);
+				// 	//这里变成把数据发送到网关的逻辑处理线程
+				// 	//
+				// 	break;
+				// case SOCKET_ACCEPT://client connect
+				// 	printf("accept[id=%d] from [id=%d]",result.id,result.lid_size);
+				// 	socket_server_start(ss,result.id);  //add to epoll
+				// 	break;		
+				// case SOCKET_CLOSE:
+				// 	printf("closed[id=%d]\n",result.id);
+				// 	break;
+				// case SOCKET_SUCCESS:	
+				// 	printf("success[id=%d] add to epoll\n",result.id);
+				// 	break;

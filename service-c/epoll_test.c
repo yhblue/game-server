@@ -1,4 +1,4 @@
-#include "socket_server.h"
+﻿#include "socket_server.h"
 #include "socket_epoll.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -47,3 +47,6 @@ int main()
 _EXIT:
 	socket_server_release(ss);
 }
+
+
+//http://www.cnblogs.com/sniperHW/category/398925.html
