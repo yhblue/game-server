@@ -16,13 +16,20 @@ queue* queue_creat()
     return q;  
 }  
 
-void set_qnode(q_node* qnode,char type,int uid,int len,char* buf,q_node* next)
+q_node* set_qnode(void* buf,char type,int uid,int len,q_node* next)
 {
+    q_node* qnode = (q_node*)malloc(sizeof(q_node));
+    if(qnode == NULL)
+    {
+        fprintf(ERR_FILE,"set_qnode:qnode malloc failed\n"); 
+        return NULL;
+    }
     qnode->type = type;
     qnode->uid = uid;
     qnode->len = len;
     qnode->buffer = buf;
     qnode->next = next; 
+    return qnode;
 }
 
 int queue_push(queue* q,q_node* qnode)

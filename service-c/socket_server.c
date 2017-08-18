@@ -745,7 +745,7 @@ int socket_server_start(struct socket_server *ss,int id)
 void socket_server_release(struct socket_server *ss)
 {
 	int i = 0;
-	struct socket *s = NULL;
+	struct socket* s = NULL;
 	for(i=0; i<MAX_SOCKET; i++)
 	{
 		s = &ss->socket_pool[i];
@@ -762,24 +762,10 @@ void socket_server_release(struct socket_server *ss)
 }
 
 
-
-// typedef struct node 
-// {  
-//     char type;
-//     int uid;  	   //socket uid
-//     int len;	   //for data is length,for other is 0
-//     char* buffer;  //for data is data,for other is NULL
-//     struct node* next;  
-// }q_node;
-
 //网络io线程只负责读写和负责通知网关处理线程处理
 int dispose_event_result(struct socket_server* ss,struct socket_message *result,int type)
 {
-	q_node* qnode = (q_node*)malloc(sizeof(q_node));
-	if(qnode == NULL) 
-	{
-		fprintf(ERR_FILE,"dispose_event_result:qnode malloc failed\n");
-	}
+	q_node* qnode = NULL;
 
 	int uid = result.id;
 	char* buf = result.data;
@@ -787,15 +773,15 @@ int dispose_event_result(struct socket_server* ss,struct socket_message *result,
 	switch(type)
 	{
 		case SOCKET_DATA:
-			set_qnode(qnode,TYPE_DATA,uid,len,buf,NULL);
+			qnode = set_qnode(buf,TYPE_DATA,uid,len,NULL);
 			break;
 
 		case SOCKET_CLOSE:
-			set_qnode(qnode,TYPE_CLOSE,uid,0,NULL,NULL);	
+			qnode = set_qnode(NULL,TYPE_CLOSE,uid,0,NULL);	
 			break;
 
 		case SOCKET_SUCCESS:
-			set_qnode(qnode,TYPE_SUCCESS,uid,0,NULL,NULL);
+			qnode = set_qnode(NULL,TYPE_SUCCESS,uid,0,NULL);
 			break;
 	}
 	queue_push(ss->que,qnode);
